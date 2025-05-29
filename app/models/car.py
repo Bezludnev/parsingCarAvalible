@@ -12,7 +12,7 @@ class Car(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(500), nullable=False)
-    link = Column(String(1000), unique=True, nullable=False, index=True)
+    link = Column(String(500), unique=True, nullable=False, index=True)
     price = Column(String(100))
     brand = Column(String(50), index=True)
     year = Column(Integer, index=True)

@@ -1,6 +1,6 @@
 # app/services/telegram_service.py
 from aiogram import Bot
-from aiogram.types import ParseMode
+from aiogram.enums import ParseMode
 from app.config import settings
 from app.models.car import Car
 import logging
