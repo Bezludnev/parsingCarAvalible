@@ -1,6 +1,7 @@
 # app/services/telegram_service.py
 from aiogram import Bot
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramAPIError
 from app.config import settings
 from app.models.car import Car
 import logging
@@ -21,9 +22,13 @@ class TelegramService:
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False
             )
-            logger.info(f"Уведомление отправлено для машины ID: {car.id}")
+            logger.info(f"✅ Уведомление отправлено для машины ID: {car.id}")
+        except TelegramAPIError as e:
+            logger.error(f"❌ Telegram API ошибка для машины ID {car.id}: {e}")
+            raise  # Перебрасываем исключение для обработки в monitor_service
         except Exception as e:
-            logger.error(f"Ошибка отправки уведомления: {e}")
+            logger.error(f"❌ Неожиданная ошибка отправки уведомления для машины ID {car.id}: {e}")
+            raise
 
     def _format_car_message(self, car: Car) -> str:
         return f"""

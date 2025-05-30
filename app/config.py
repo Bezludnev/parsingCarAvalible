@@ -13,14 +13,20 @@ class Settings(BaseSettings):
         "mercedes": {
             "url": "https://www.bazaraki.com/car-motorbikes-boats-and-parts/cars-trucks-and-vans/mercedes/?price_min=6000&price_max=12500",
             "min_year": 2012,
-            "max_mileage": 150000,
+            "max_mileage": 200000,
             "brand": "Mercedes"
         },
         "bmw": {
             "url": "https://www.bazaraki.com/car-motorbikes-boats-and-parts/cars-trucks-and-vans/bmw/mileage_max---125000/?price_min=6000&price_max=12500",
-            "min_year": 2013,
+            "min_year": 2012,
             "max_mileage": 125000,
             "brand": "BMW"
+        },
+        "audi": {
+            "url": "https://www.bazaraki.com/car-motorbikes-boats-and-parts/cars-trucks-and-vans/audi/year_min---63/?price_min=6000&price_max=12500",
+            "min_year": 2012,
+            "max_mileage": 125000,
+            "brand": "Audi"
         }
     }
 
