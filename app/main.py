@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.database import init_db
 from app.api.cars import router as cars_router
 from app.services.monitor_service import MonitorService
+from datetime import datetime
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -15,21 +16,33 @@ scheduler = AsyncIOScheduler()
 monitor_service = MonitorService()
 
 
+async def check_cars_with_night_pause():
+    """Проверка с учетом ночного времени"""
+    current_hour = datetime.now().hour
+
+    if 2 <= current_hour < 6:
+        logger.info("Ночное время (02:00-06:00) - пропускаем проверку")
+        return
+
+    await monitor_service.check_new_cars()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     await init_db()
     logger.info("База данных инициализирована")
 
-    # Schedule monitoring every 30 minutes
+    # Schedule monitoring with random interval (5-10 min) and night pause
     scheduler.add_job(
-        monitor_service.check_new_cars,
+        check_cars_with_night_pause,
         'interval',
-        minutes=30,
+        minutes=7.5,  # базовый интервал
+        jitter=150,  # ±2.5 минуты в секундах (итого 5-10 мин)
         id='car_monitor'
     )
     scheduler.start()
-    logger.info("Scheduler запущен (проверка каждые 30 минут)")
+    logger.info("Scheduler запущен (проверка каждые 5-10 минут, ночью не работает)")
 
     yield
 
