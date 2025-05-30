@@ -12,7 +12,7 @@ router = APIRouter(prefix="/cars", tags=["cars"])
 @router.get("/", response_model=List[CarResponse])
 async def get_cars(
     filter_name: str = None,
-    limit: int = 30,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db)
 ):
     repo = CarRepository(db)

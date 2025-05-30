@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str
     telegram_chat_id: str
     chromedriver_path: str = "/usr/local/bin/chromedriver"
+    openai_api_key: str
 
     # Фильтры для поиска
     car_filters: Dict[str, Dict] = {

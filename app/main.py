@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.database import init_db
 from app.api.cars import router as cars_router
+from app.api.analysis import router as analysis_router
 from app.services.monitor_service import MonitorService
 from datetime import datetime
 import logging
@@ -52,20 +53,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Car Monitor Bot",
-    description="Telegram bot для мониторинга автомобилей на Bazaraki",
-    version="1.0.0",
+    title="Car Monitor Bot with AI Analysis",
+    description="Telegram bot для мониторинга автомобилей на Bazaraki с AI анализом",
+    version="2.0.0",
     lifespan=lifespan
 )
 
 app.include_router(cars_router)
+app.include_router(analysis_router)
 
 
 @app.get("/")
 async def root():
-    return {"message": "Car Monitor Bot работает"}
+    return {"message": "Car Monitor Bot with AI Analysis работает"}
 
 
 @app.get("/health")
 async def health():
-    return {"status": "OK"}
+    return {"status": "OK", "features": ["monitoring", "ai_analysis", "telegram_notifications"]}
