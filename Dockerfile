@@ -36,9 +36,16 @@ RUN CHROME_VERSION=$(google-chrome --version | cut -d ' ' -f3 | cut -d '.' -f1-3
     && rm -rf /tmp/chromedriver*
 
 WORKDIR /app
+
+# Создаем директории для отчетов и логов
+RUN mkdir -p /app/reports /app/logs
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# Устанавливаем права доступа для директорий
+RUN chmod -R 755 /app/reports /app/logs
 
 CMD ["python", "startup.py"]

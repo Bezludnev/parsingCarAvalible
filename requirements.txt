@@ -12,3 +12,4 @@ apscheduler==3.10.4
 httpx==0.25.2
 cryptography==41.0.7
 alembic==1.13.1
+python-multipart==0.0.6
