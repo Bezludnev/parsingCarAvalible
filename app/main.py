@@ -1,10 +1,11 @@
-# app/main.py
+# app/main.py - ОБНОВЛЕННАЯ с reports router
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.database import init_db
 from app.api.cars import router as cars_router
 from app.api.analysis import router as analysis_router
+from app.api.reports import router as reports_router  # НОВЫЙ
 from app.services.monitor_service import MonitorService
 from datetime import datetime
 import logging
@@ -53,21 +54,46 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Car Monitor Bot with AI Analysis",
-    description="Telegram bot для мониторинга автомобилей на Bazaraki с AI анализом",
-    version="2.0.0",
+    title="Car Monitor Bot with AI Analysis & HTML Reports",
+    description="Telegram bot для мониторинга автомобилей на Bazaraki с AI анализом и HTML отчетами",
+    version="2.1.0",
     lifespan=lifespan
 )
 
+# Подключаем роутеры
 app.include_router(cars_router)
 app.include_router(analysis_router)
+app.include_router(reports_router)  # НОВЫЙ
 
 
 @app.get("/")
 async def root():
-    return {"message": "Car Monitor Bot with AI Analysis работает"}
+    return {
+        "message": "Car Monitor Bot with AI Analysis & HTML Reports работает",
+        "version": "2.1.0",
+        "features": [
+            "monitoring",
+            "ai_analysis",
+            "telegram_notifications",
+            "html_reports"
+        ]
+    }
 
 
 @app.get("/health")
 async def health():
-    return {"status": "OK", "features": ["monitoring", "ai_analysis", "telegram_notifications"]}
+    return {
+        "status": "OK",
+        "features": [
+            "monitoring",
+            "ai_analysis",
+            "telegram_notifications",
+            "html_reports",
+            "file_downloads"
+        ],
+        "endpoints": {
+            "cars": "/cars",
+            "analysis": "/analysis",
+            "reports": "/reports"
+        }
+    }

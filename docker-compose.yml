@@ -1,4 +1,4 @@
-# docker-compose.yml
+# docker-compose.yml - ОБНОВЛЕННАЯ с reports volume
 version: '3.8'
 
 services:
@@ -25,8 +25,13 @@ services:
       - DATABASE_URL=mysql+aiomysql://caruser:carpass@mysql:3306/car_monitor
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - .:/app
+      - html_reports:/app/reports  # НОВЫЙ: для сохранения HTML отчетов
+      - app_logs:/app/logs         # НОВЫЙ: для логов
 
 volumes:
   mysql_data:
+  html_reports:  # НОВЫЙ: для HTML отчетов
+  app_logs:      # НОВЫЙ: для логов
