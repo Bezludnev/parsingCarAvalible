@@ -1,5 +1,5 @@
-# app/api/analysis.py
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+# app/api/analysis.py - ОБНОВЛЕННАЯ ВЕРСИЯ с o3-mini
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from app.services.analysis_service import AnalysisService
 from app.schemas.analysis import (
     AnalysisResponse,
@@ -7,19 +7,18 @@ from app.schemas.analysis import (
     RecentCarsRequest,
     QuickAnalysisResponse
 )
-from typing import List
 import logging
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/analysis", tags=["analysis"])
+router = APIRouter(prefix="/analysis", tags=["AI Analysis"])
 
 
 @router.post("/by-filter/{filter_name}", response_model=AnalysisResponse)
 async def analyze_by_filter(
         filter_name: str,
-        limit: int = 20
+        limit: int = Query(default=20, ge=5, le=50)
 ):
-    """Анализирует машины по фильтру (mercedes, bmw, audi)"""
+    """🤖 AI анализ машин по фильтру через o3-mini (mercedes, bmw, audi)"""
     try:
         service = AnalysisService()
         result = await service.analyze_cars_by_filter(filter_name, limit)
@@ -28,14 +27,17 @@ async def analyze_by_filter(
             raise HTTPException(status_code=404, detail=result["error"])
 
         return result
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Analysis error: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка анализа: {str(e)}")
+        logger.error(f"Analysis error for filter {filter_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка AI анализа: {str(e)}")
 
 
 @router.post("/compare", response_model=AnalysisResponse)
 async def compare_cars(request: ComparisonRequest):
-    """Сравнивает конкретные машины по ID"""
+    """🆚 Сравнение конкретных машин через o3-mini"""
     try:
         service = AnalysisService()
         result = await service.compare_specific_cars(request.car_ids)
@@ -44,6 +46,9 @@ async def compare_cars(request: ComparisonRequest):
             raise HTTPException(status_code=404, detail=result["error"])
 
         return result
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Comparison error: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка сравнения: {str(e)}")
@@ -51,15 +56,18 @@ async def compare_cars(request: ComparisonRequest):
 
 @router.post("/recent", response_model=AnalysisResponse)
 async def analyze_recent_cars(request: RecentCarsRequest):
-    """Анализирует недавние машины"""
+    """📅 Анализ недавних поступлений через o3-mini"""
     try:
         service = AnalysisService()
-        result = await service.analyze_all_recent_cars(request.days, request.limit)
+        result = await service.analyze_recent_cars(request.days, request.limit)
 
         if "error" in result:
             raise HTTPException(status_code=404, detail=result["error"])
 
         return result
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Recent analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка анализа: {str(e)}")
@@ -68,9 +76,9 @@ async def analyze_recent_cars(request: RecentCarsRequest):
 @router.get("/brand/{brand}", response_model=AnalysisResponse)
 async def analyze_by_brand(
         brand: str,
-        limit: int = 15
+        limit: int = Query(default=15, ge=5, le=30)
 ):
-    """Анализ по марке"""
+    """🏷️ Анализ по марке автомобиля через o3-mini"""
     try:
         service = AnalysisService()
         result = await service.get_brand_analysis(brand, limit)
@@ -79,58 +87,160 @@ async def analyze_by_brand(
             raise HTTPException(status_code=404, detail=result["error"])
 
         return result
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Brand analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка анализа марки: {str(e)}")
 
 
-@router.get("/quick/{filter_name}")
+@router.get("/quick/{filter_name}", response_model=QuickAnalysisResponse)
 async def quick_analysis(filter_name: str):
-    """Быстрый анализ без детальной обработки"""
+    """⚡ Быстрый анализ через o3-mini без детального разбора"""
     try:
         service = AnalysisService()
-
-        # Получаем краткий анализ
-        result = await service.analyze_cars_by_filter(filter_name, 10)
+        result = await service.get_quick_insight(filter_name)
 
         if "error" in result:
             raise HTTPException(status_code=404, detail=result["error"])
 
-        # Извлекаем ключевые моменты
-        recommendations = result.get("top_recommendations", "").split("\n")[:3]
+        return result
 
-        return {
-            "total_cars": result["total_cars_analyzed"],
-            "top_3_recommendations": [rec.strip() for rec in recommendations if rec.strip()],
-            "analysis_summary": result.get("general_conclusions", "")[:300] + "...",
-            "filter_name": filter_name
-        }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Quick analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка быстрого анализа: {str(e)}")
 
 
-@router.post("/background/{filter_name}")
-async def start_background_analysis(
-        filter_name: str,
-        background_tasks: BackgroundTasks,
-        limit: int = 30
-):
-    """Запускает анализ в фоне для больших объемов"""
+@router.post("/send-to-telegram/{filter_name}")
+async def send_analysis_to_telegram(filter_name: str, limit: int = Query(default=15, ge=5, le=30)):
+    """📱 Отправить AI анализ в Telegram"""
+    try:
+        service = AnalysisService()
+        result = await service.analyze_cars_by_filter(filter_name, limit)
 
-    async def run_analysis():
-        try:
-            service = AnalysisService()
-            result = await service.analyze_cars_by_filter(filter_name, limit)
-            logger.info(f"Background analysis completed for {filter_name}")
-            # Здесь можно отправить результат в Telegram или сохранить в кеш
-        except Exception as e:
-            logger.error(f"Background analysis failed: {e}")
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
 
-    background_tasks.add_task(run_analysis)
+        # Отправляем в Telegram
+        from app.services.telegram_service import TelegramService
+        telegram = TelegramService()
+        await telegram.send_ai_analysis_report(result)
 
-    return {
-        "message": f"Анализ {filter_name} запущен в фоне",
-        "filter_name": filter_name,
-        "limit": limit
-    }
+        return {
+            "status": "sent_to_telegram",
+            "filter_name": filter_name,
+            "cars_analyzed": result["total_cars_analyzed"],
+            "message": f"AI анализ {filter_name} отправлен в Telegram"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Telegram send error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка отправки в Telegram: {str(e)}")
+
+
+@router.post("/manual-analysis")
+async def trigger_manual_analysis(filter_name: str = Query(default=None, description="Конкретный фильтр или все")):
+    """🔧 Ручной запуск AI анализа с отправкой в Telegram"""
+    try:
+        from app.services.monitor_service import MonitorService
+
+        monitor = MonitorService()
+        result = await monitor.run_manual_ai_analysis(filter_name)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Manual analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка ручного анализа: {str(e)}")
+
+
+@router.get("/status")
+async def get_analysis_status():
+    """📊 Статус сервиса анализа с o3-mini"""
+    try:
+        from app.services.openai_service import OpenAIService
+
+        openai_service = OpenAIService()
+        connection_test = await openai_service.test_connection()
+
+        if connection_test.get("status") == "success":
+            return {
+                "status": "operational",
+                "ai_service": "online",
+                "model": "o3-mini",
+                "features": [
+                    "filter_analysis",
+                    "car_comparison",
+                    "recent_analysis",
+                    "brand_analysis",
+                    "quick_insights"
+                ],
+                "supported_brands": ["mercedes", "bmw", "audi"],
+                "connection_test": "passed"
+            }
+        else:
+            return {
+                "status": "degraded",
+                "ai_service": "limited",
+                "model": "o3-mini",
+                "error": connection_test.get("error"),
+                "connection_test": "failed"
+            }
+
+    except Exception as e:
+        logger.error(f"Status check failed: {e}")
+        return {
+            "status": "offline",
+            "ai_service": "offline",
+            "model": "o3-mini",
+            "error": str(e)
+        }
+
+
+@router.get("/models")
+async def get_available_models():
+    """🔧 Проверка доступных AI моделей"""
+    try:
+        from app.services.openai_service import OpenAIService
+
+        openai_service = OpenAIService()
+        models = await openai_service.get_available_models()
+
+        return {
+            "available_models": models,
+            "current_model": "o3-mini",
+            "total_models": len(models)
+        }
+
+    except Exception as e:
+        logger.error(f"Models check failed: {e}")
+        return {
+            "available_models": ["o3-mini"],
+            "current_model": "o3-mini",
+            "error": str(e)
+        }
+
+
+@router.get("/test-connection")
+async def test_openai_connection():
+    """🔗 Тест подключения к OpenAI API"""
+    try:
+        from app.services.openai_service import OpenAIService
+
+        openai_service = OpenAIService()
+        result = await openai_service.test_connection()
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Connection test failed: {e}")
+        return {
+            "status": "error",
+            "model": "o3-mini",
+            "error": str(e)
+        }
