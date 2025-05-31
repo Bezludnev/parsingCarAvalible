@@ -1,11 +1,12 @@
-# app/main.py - ОБНОВЛЕННАЯ с reports router
+# app/main.py - ОБНОВЛЕННАЯ с car-details router
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.database import init_db
 from app.api.cars import router as cars_router
 from app.api.analysis import router as analysis_router
-from app.api.reports import router as reports_router  # НОВЫЙ
+from app.api.reports import router as reports_router
+from app.api.car_details import router as car_details_router  # НОВЫЙ
 from app.services.monitor_service import MonitorService
 from datetime import datetime
 import logging
@@ -54,28 +55,31 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Car Monitor Bot with AI Analysis & HTML Reports",
-    description="Telegram bot для мониторинга автомобилей на Bazaraki с AI анализом и HTML отчетами",
-    version="2.1.0",
+    title="Car Monitor Bot with AI Analysis & Detailed Car Data",
+    description="Telegram bot для мониторинга автомобилей на Bazaraki с AI анализом, HTML отчетами и детальным парсингом",
+    version="2.2.0",
     lifespan=lifespan
 )
 
 # Подключаем роутеры
 app.include_router(cars_router)
 app.include_router(analysis_router)
-app.include_router(reports_router)  # НОВЫЙ
+app.include_router(reports_router)
+app.include_router(car_details_router)  # НОВЫЙ
 
 
 @app.get("/")
 async def root():
     return {
-        "message": "Car Monitor Bot with AI Analysis & HTML Reports работает",
-        "version": "2.1.0",
+        "message": "Car Monitor Bot with AI Analysis, HTML Reports & Detailed Car Data работает",
+        "version": "2.2.0",
         "features": [
             "monitoring",
             "ai_analysis",
             "telegram_notifications",
-            "html_reports"
+            "html_reports",
+            "detailed_car_parsing",
+            "advanced_search"
         ]
     }
 
@@ -89,11 +93,14 @@ async def health():
             "ai_analysis",
             "telegram_notifications",
             "html_reports",
-            "file_downloads"
+            "file_downloads",
+            "detailed_car_data",
+            "car_characteristics_search"
         ],
         "endpoints": {
             "cars": "/cars",
             "analysis": "/analysis",
-            "reports": "/reports"
+            "reports": "/reports",
+            "car_details": "/car-details"
         }
     }

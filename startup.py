@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Startup script для инициализации Alembic и запуска приложения
+Startup script для инициализации Alembic и запуска приложения - ИСПРАВЛЕННЫЙ
 """
 import os
 import subprocess
@@ -30,8 +30,8 @@ def wait_for_mysql():
 
 
 def clean_alembic_state():
-    """Очищает состояние alembic в базе данных"""
-    print("[STARTUP] Очистка состояния Alembic в базе...")
+    """Полностью очищает состояние alembic и базы данных"""
+    print("[STARTUP] Полная очистка состояния Alembic и базы...")
     try:
         clean_script = """
 import aiomysql
@@ -60,37 +60,52 @@ asyncio.run(clean_db())
 
         if result.returncode == 0:
             print("[STARTUP] ✅ База данных очищена")
-            return True
         else:
             print(f"[STARTUP] ⚠️ Ошибка очистки: {result.stderr}")
-            return False
+
+        # НОВОЕ: Очищаем папку с миграциями
+        versions_dir = Path("alembic/versions")
+        if versions_dir.exists():
+            for migration_file in versions_dir.glob("*.py"):
+                if migration_file.name != "__pycache__":
+                    migration_file.unlink()
+                    print(f"[STARTUP] Удален файл миграции: {migration_file.name}")
+
+        print("[STARTUP] ✅ Старые миграции удалены")
+        return True
 
     except Exception as e:
-        print(f"[STARTUP] ⚠️ Не удалось очистить базу: {e}")
+        print(f"[STARTUP] ⚠️ Не удалось очистить: {e}")
         return False
 
 
 def init_alembic():
     """Инициализация Alembic"""
-    if not Path("alembic.ini").exists():
+    # Если папки alembic нет - инициализируем
+    if not Path("alembic").exists():
         print("[STARTUP] Инициализация Alembic...")
         subprocess.run(["alembic", "init", "alembic"], check=True)
 
-        # Обновляем alembic.ini для MySQL
-        with open("alembic.ini", "r") as f:
-            ini_content = f.read()
+    # Если alembic.ini нет - создаем
+    if not Path("alembic.ini").exists():
+        print("[STARTUP] Создание alembic.ini...")
+        subprocess.run(["alembic", "init", "alembic"], check=True)
 
-        # Заменяем sqlalchemy.url на переменную окружения
-        ini_content = ini_content.replace(
-            "sqlalchemy.url = driver://user:pass@localhost/dbname",
-            "# sqlalchemy.url = driver://user:pass@localhost/dbname\n# URL устанавливается в env.py"
-        )
+    # Обновляем alembic.ini для MySQL
+    with open("alembic.ini", "r") as f:
+        ini_content = f.read()
 
-        with open("alembic.ini", "w") as f:
-            f.write(ini_content)
+    # Заменяем sqlalchemy.url на переменную окружения
+    ini_content = ini_content.replace(
+        "sqlalchemy.url = driver://user:pass@localhost/dbname",
+        "# sqlalchemy.url = driver://user:pass@localhost/dbname\n# URL устанавливается в env.py"
+    )
 
-        # Обновляем env.py для async
-        env_content = '''import asyncio
+    with open("alembic.ini", "w") as f:
+        f.write(ini_content)
+
+    # Обновляем env.py для async
+    env_content = '''import asyncio
 import os
 from logging.config import fileConfig
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -142,7 +157,7 @@ async def run_async_migrations():
     """
     connectable = create_async_engine(
         config.get_main_option("sqlalchemy.url"),
-        echo=True  # Для отладки
+        echo=False  # Убираем отладку для чистоты логов
     )
 
     async with connectable.connect() as connection:
@@ -161,10 +176,10 @@ if context.is_offline_mode():
 else:
     run_migrations_online()
 '''
-        with open("alembic/env.py", "w") as f:
-            f.write(env_content)
+    with open("alembic/env.py", "w") as f:
+        f.write(env_content)
 
-    # Проверяем есть ли уже миграции
+    # Проверяем папку versions
     versions_dir = Path("alembic/versions")
     if not versions_dir.exists():
         versions_dir.mkdir(exist_ok=True)
@@ -172,53 +187,99 @@ else:
     # Проверяем есть ли файлы миграций
     migration_files = list(versions_dir.glob("*.py"))
     if not migration_files:
-        print("[STARTUP] Создание первой миграции...")
+        print("[STARTUP] Создание новой миграции с полной структурой...")
 
-        # Сначала попробуем создать пустую миграцию
+        # ИСПРАВЛЕННАЯ ЛОГИКА: Всегда создаем автогенерированную миграцию
         try:
-            subprocess.run([
-                "alembic", "revision",
-                "--autogenerate",
-                "-m", "Initial migration"
-            ], check=True, capture_output=True, text=True)
-            print("[STARTUP] ✅ Автогенерированная миграция создана")
-        except subprocess.CalledProcessError as e:
-            print(f"[STARTUP] ⚠️ Автогенерация не удалась: {e}")
-            print("[STARTUP] Создаем базовую миграцию вручную...")
-
-            # Создаем миграцию вручную
+            # Создаем автогенерированную миграцию на основе моделей
             result = subprocess.run([
                 "alembic", "revision",
-                "-m", "Initial migration"
+                "--autogenerate",
+                "-m", "Initial migration with detailed car fields"
             ], check=True, capture_output=True, text=True)
 
-            # Находим созданный файл миграции
-            migration_files = list(versions_dir.glob("*.py"))
-            if migration_files:
-                migration_file = migration_files[-1]  # Последний созданный
+            print("[STARTUP] ✅ Автогенерированная миграция создана")
+            print(f"[STARTUP] Вывод: {result.stdout}")
 
-                # Заполняем миграцию содержимым
-                migration_content = f'''"""Initial migration
+        except subprocess.CalledProcessError as e:
+            print(f"[STARTUP] ❌ Автогенерация не удалась: {e}")
+            print(f"[STARTUP] STDOUT: {e.stdout}")
+            print(f"[STARTUP] STDERR: {e.stderr}")
 
-Revision ID: {migration_file.stem.split('_')[0]}
+            # Fallback: создаем миграцию вручную
+            print("[STARTUP] Создаем миграцию вручную...")
+            create_manual_migration()
+    else:
+        print(f"[STARTUP] Найдено {len(migration_files)} файлов миграций")
+
+    print("[STARTUP] Применение миграций...")
+    try:
+        result = subprocess.run(["alembic", "upgrade", "head"],
+                                check=True, capture_output=True, text=True)
+        print("[STARTUP] ✅ Миграции применены успешно")
+        print(f"[STARTUP] Вывод: {result.stdout}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"[STARTUP] ❌ Ошибка применения миграций:")
+        print(f"Return code: {e.returncode}")
+        if e.stdout:
+            print(f"STDOUT: {e.stdout}")
+        if e.stderr:
+            print(f"STDERR: {e.stderr}")
+
+        # Показываем текущее состояние
+        try:
+            current_result = subprocess.run(["alembic", "current"],
+                                            capture_output=True, text=True)
+            print(f"Alembic current: {current_result.stdout}")
+
+            history_result = subprocess.run(["alembic", "history"],
+                                            capture_output=True, text=True)
+            print(f"Alembic history: {history_result.stdout}")
+        except:
+            pass
+
+        raise
+
+
+def create_manual_migration():
+    """Создает миграцию вручную при неудаче автогенерации"""
+
+    # Создаем пустую миграцию
+    result = subprocess.run([
+        "alembic", "revision",
+        "-m", "Initial migration with detailed car fields"
+    ], check=True, capture_output=True, text=True)
+
+    # Находим созданный файл
+    versions_dir = Path("alembic/versions")
+    migration_files = list(versions_dir.glob("*.py"))
+    if migration_files:
+        migration_file = migration_files[-1]  # Последний созданный
+        revision_id = migration_file.stem.split('_')[0]
+
+        # Содержимое миграции
+        migration_content = f'''"""Initial migration with detailed car fields
+
+Revision ID: {revision_id}
 Revises: 
 Create Date: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import mysql
 
 # revision identifiers
-revision = '{migration_file.stem.split('_')[0]}'
+revision = '{revision_id}'
 down_revision = None
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
-    # ### commands auto generated by Alembic - please adjust! ###
+    # Создание таблицы cars с полной структурой
     op.create_table('cars',
+        # Основные поля
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('title', sa.String(length=500), nullable=False),
         sa.Column('link', sa.String(length=500), nullable=False),
@@ -233,56 +294,66 @@ def upgrade():
         sa.Column('is_notified', sa.Boolean(), nullable=True, default=False),
         sa.Column('created_at', sa.DateTime(), nullable=True, server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(), nullable=True, server_default=sa.func.now(), onupdate=sa.func.now()),
+
+        # Детальные поля
+        sa.Column('mot_till', sa.String(length=50), nullable=True),
+        sa.Column('colour', sa.String(length=50), nullable=True),
+        sa.Column('gearbox', sa.String(length=50), nullable=True),
+        sa.Column('fuel_type', sa.String(length=50), nullable=True),
+        sa.Column('engine_size', sa.String(length=50), nullable=True),
+        sa.Column('doors', sa.String(length=20), nullable=True),
+        sa.Column('seats', sa.String(length=20), nullable=True),
+        sa.Column('condition', sa.String(length=50), nullable=True),
+        sa.Column('previous_owners', sa.String(length=20), nullable=True),
+        sa.Column('registration', sa.String(length=100), nullable=True),
+        sa.Column('import_duty_paid', sa.String(length=20), nullable=True),
+        sa.Column('roadworthy_certificate', sa.String(length=20), nullable=True),
+        sa.Column('description', sa.Text(), nullable=True),
+        sa.Column('seller_type', sa.String(length=50), nullable=True),
+        sa.Column('contact_info', sa.Text(), nullable=True),
+        sa.Column('details_parsed', sa.Boolean(), nullable=True, default=False),
+        sa.Column('details_parsed_at', sa.DateTime(), nullable=True),
+        sa.Column('extra_characteristics', sa.Text(), nullable=True),
+
         sa.PrimaryKeyConstraint('id')
     )
+
+    # Создание индексов
     op.create_index(op.f('ix_cars_brand'), 'cars', ['brand'], unique=False)
     op.create_index(op.f('ix_cars_filter_name'), 'cars', ['filter_name'], unique=False)
     op.create_index(op.f('ix_cars_id'), 'cars', ['id'], unique=False)
     op.create_index(op.f('ix_cars_link'), 'cars', ['link'], unique=True)
     op.create_index(op.f('ix_cars_mileage'), 'cars', ['mileage'], unique=False)
     op.create_index(op.f('ix_cars_year'), 'cars', ['year'], unique=False)
-    # ### end Alembic commands ###
+    op.create_index(op.f('ix_cars_colour'), 'cars', ['colour'], unique=False)
+    op.create_index(op.f('ix_cars_fuel_type'), 'cars', ['fuel_type'], unique=False)
+    op.create_index(op.f('ix_cars_gearbox'), 'cars', ['gearbox'], unique=False)
+    op.create_index(op.f('ix_cars_details_parsed'), 'cars', ['details_parsed'], unique=False)
+    op.create_index(op.f('ix_cars_seller_type'), 'cars', ['seller_type'], unique=False)
 
 
 def downgrade():
-    # ### commands auto generated by Alembic - please adjust! ###
+    # Удаление индексов
+    op.drop_index(op.f('ix_cars_seller_type'), table_name='cars')
+    op.drop_index(op.f('ix_cars_details_parsed'), table_name='cars')
+    op.drop_index(op.f('ix_cars_gearbox'), table_name='cars')
+    op.drop_index(op.f('ix_cars_fuel_type'), table_name='cars')
+    op.drop_index(op.f('ix_cars_colour'), table_name='cars')
     op.drop_index(op.f('ix_cars_year'), table_name='cars')
     op.drop_index(op.f('ix_cars_mileage'), table_name='cars')
     op.drop_index(op.f('ix_cars_link'), table_name='cars')
     op.drop_index(op.f('ix_cars_id'), table_name='cars')
     op.drop_index(op.f('ix_cars_filter_name'), table_name='cars')
     op.drop_index(op.f('ix_cars_brand'), table_name='cars')
+
+    # Удаление таблицы
     op.drop_table('cars')
-    # ### end Alembic commands ###
 '''
 
-                with open(migration_file, "w") as f:
-                    f.write(migration_content)
+        with open(migration_file, "w") as f:
+            f.write(migration_content)
 
-                print(f"[STARTUP] ✅ Создана базовая миграция: {migration_file.name}")
-
-    print("[STARTUP] Применение миграций...")
-    try:
-        result = subprocess.run(["alembic", "upgrade", "head"],
-                                check=True, capture_output=True, text=True)
-        print("[STARTUP] ✅ Миграции применены успешно")
-    except subprocess.CalledProcessError as e:
-        print(f"[STARTUP] ❌ Ошибка применения миграций:")
-        print(f"Return code: {e.returncode}")
-        if e.stdout:
-            print(f"STDOUT: {e.stdout}")
-        if e.stderr:
-            print(f"STDERR: {e.stderr}")
-
-        # Попробуем показать текущее состояние alembic
-        try:
-            current_result = subprocess.run(["alembic", "current"],
-                                            capture_output=True, text=True)
-            print(f"Alembic current: {current_result.stdout}")
-        except:
-            pass
-
-        raise
+        print(f"[STARTUP] ✅ Создана ручная миграция: {migration_file.name}")
 
 
 if __name__ == "__main__":
@@ -290,12 +361,55 @@ if __name__ == "__main__":
         print("[ERROR] MySQL недоступен")
         sys.exit(1)
 
-    # Очищаем состояние базы данных
-    clean_alembic_state()
+    # Полная очистка состояния
+    if not clean_alembic_state():
+        print("[WARNING] Не удалось полностью очистить состояние")
 
     try:
         init_alembic()
-        print("[STARTUP] ✅ База данных инициализирована")
+
+        # Проверяем что таблица создалась
+        check_script = """
+import aiomysql
+import asyncio
+
+async def check_table():
+    try:
+        conn = await aiomysql.connect(
+            host='mysql', port=3306, 
+            user='caruser', password='carpass', 
+            db='car_monitor'
+        )
+        async with conn.cursor() as cursor:
+            await cursor.execute("SHOW TABLES LIKE 'cars'")
+            result = await cursor.fetchone()
+            if result:
+                await cursor.execute("DESCRIBE cars")
+                columns = await cursor.fetchall()
+                print(f"✅ Таблица cars создана с {len(columns)} полями")
+
+                detail_fields = [
+                    'mot_till', 'colour', 'gearbox', 'fuel_type', 'engine_size',
+                    'doors', 'seats', 'condition', 'previous_owners', 'registration',
+                    'import_duty_paid', 'roadworthy_certificate', 'description',
+                    'seller_type', 'contact_info', 'details_parsed', 'details_parsed_at',
+                    'extra_characteristics'
+                ]
+
+                found_fields = [col[0] for col in columns if col[0] in detail_fields]
+                print(f"✅ Детальных полей найдено: {len(found_fields)}/{len(detail_fields)}")
+            else:
+                print("❌ Таблица cars не найдена")
+        conn.close()
+    except Exception as e:
+        print(f"❌ Ошибка проверки таблицы: {e}")
+
+asyncio.run(check_table())
+"""
+
+        subprocess.run(["python", "-c", check_script], timeout=10)
+        print("[STARTUP] ✅ База данных инициализирована с детальными полями")
+
     except Exception as e:
         print(f"[ERROR] Ошибка инициализации базы: {e}")
         sys.exit(1)
