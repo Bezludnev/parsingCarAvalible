@@ -16,6 +16,28 @@ class MonitorService:
         self.telegram = TelegramService()
         self.analysis = AnalysisService()  # ДОБАВЛЕНО
 
+    async def _process_filter(self, filter_name: str, repo: CarRepository) -> int:
+        """Скрапинг и обработка одного фильтра"""
+        try:
+            cars = await self.scraper.scrape_cars(filter_name)
+            logger.info(f"Найдено {len(cars)} объявлений для фильтра {filter_name}")
+
+            new_cars_count = 0
+            for car_data in cars:
+                existing_car = await repo.get_by_link(car_data.link)
+                if not existing_car:
+                    new_car = await repo.create(car_data)
+                    logger.info(f"Новая машина добавлена: {new_car.title}")
+                    await self.telegram.send_new_car_notification(new_car)
+                    await repo.mark_as_notified(new_car.id)
+                    new_cars_count += 1
+
+            return new_cars_count
+
+        except Exception as e:
+            logger.error(f"Ошибка при обработке фильтра {filter_name}: {e}")
+            return 0
+
     async def check_new_cars(self):
         """Основная функция для проверки новых машин + AI анализ"""
         logger.info("Начинаем проверку новых объявлений...")
@@ -25,34 +47,9 @@ class MonitorService:
         async with async_session() as session:
             repo = CarRepository(session)
 
-            for filter_name in settings.car_filters.keys():
-                try:
-                    # Scrape cars
-                    cars = await self.scraper.scrape_cars(filter_name)
-                    logger.info(f"Найдено {len(cars)} объявлений для фильтра {filter_name}")
-
-                    new_cars_count = 0
-
-                    # Check for new cars
-                    for car_data in cars:
-                        existing_car = await repo.get_by_link(car_data.link)
-
-                        if not existing_car:
-                            # New car found!
-                            new_car = await repo.create(car_data)
-                            logger.info(f"Новая машина добавлена: {new_car.title}")
-
-                            # Send individual notification
-                            await self.telegram.send_new_car_notification(new_car)
-                            await repo.mark_as_notified(new_car.id)
-
-                            new_cars_count += 1
-
-                    new_cars_found[filter_name] = new_cars_count
-
-                except Exception as e:
-                    logger.error(f"Ошибка при обработке фильтра {filter_name}: {e}")
-                    new_cars_found[filter_name] = 0
+            for filter_name in settings.car_filters:
+                count = await self._process_filter(filter_name, repo)
+                new_cars_found[filter_name] = count
 
         # НОВАЯ ЛОГИКА: AI анализ если найдены новые машины
         total_new_cars = sum(new_cars_found.values())
@@ -129,7 +126,7 @@ class MonitorService:
 
             results = []
 
-            for filter_name in settings.car_filters.keys():
+            for filter_name in settings.car_filters:
                 try:
                     quick_result = await self.analysis.get_quick_insight(filter_name)
 
@@ -151,3 +148,4 @@ class MonitorService:
                     results.append({"filter": filter_name, "status": "error", "error": str(e)})
 
             return {"status": "completed", "results": results}
+
