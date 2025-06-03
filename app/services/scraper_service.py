@@ -5,6 +5,7 @@ from selenium.webdriver.chrome.service import Service
 from bs4 import BeautifulSoup
 import re
 import time
+import asyncio
 from typing import List, Dict, Optional
 from app.config import settings
 from app.schemas.car import CarCreate
@@ -106,12 +107,8 @@ class ScraperService:
             filter_name=filter_config.get("filter_name", "unknown")
         )
 
-    async def scrape_cars(self, filter_name: str) -> List[CarCreate]:
-        filter_config = settings.car_filters.get(filter_name)
-        if not filter_config:
-            return []
-
-        filter_config["filter_name"] = filter_name
+    def _scrape_cars_sync(self, filter_config: Dict) -> List[CarCreate]:
+        """Synchronous scraping logic executed in a thread"""
 
         driver = self._create_driver()
         try:
@@ -132,3 +129,15 @@ class ScraperService:
 
         finally:
             driver.quit()
+
+    async def scrape_cars(self, filter_name: str) -> List[CarCreate]:
+        """Public async method that offloads work to a thread"""
+
+        filter_config = settings.car_filters.get(filter_name)
+        if not filter_config:
+            return []
+
+        filter_config["filter_name"] = filter_name
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._scrape_cars_sync, filter_config)
