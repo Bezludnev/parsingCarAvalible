@@ -1,6 +1,7 @@
 # app/services/scraper_service.py
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from bs4 import BeautifulSoup
 import re
 import time
@@ -18,7 +19,9 @@ class ScraperService:
         self.options.add_argument('--disable-dev-shm-usage')
 
     def _create_driver(self) -> webdriver.Chrome:
-        return webdriver.Chrome(options=self.options)
+        """Create Chrome driver using path from settings"""
+        service = Service(executable_path=settings.chromedriver_path)
+        return webdriver.Chrome(service=service, options=self.options)
 
     def _parse_car_data(self, ad, filter_config: Dict) -> Optional[CarCreate]:
         # Title и link
