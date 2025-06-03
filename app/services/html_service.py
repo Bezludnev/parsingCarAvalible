@@ -153,6 +153,9 @@ class HTMLReportService:
             border-collapse: collapse;
             margin-top: 20px;
         }}
+        .table-responsive {{
+            overflow-x: auto;
+        }}
         .cars-table th, .cars-table td {{
             border: 1px solid #ddd;
             padding: 12px;
@@ -193,6 +196,15 @@ class HTMLReportService:
             white-space: pre-wrap;
             line-height: 1.5;
         }}
+        @media (max-width: 600px) {{
+            .meta-info {{
+                grid-template-columns: 1fr;
+            }}
+            .cars-table th, .cars-table td {{
+                padding: 8px;
+                font-size: 0.9em;
+            }}
+        }}
     </style>
 </head>
 <body>
@@ -229,6 +241,7 @@ class HTMLReportService:
 
         <div class="section">
             <h2>📋 Список проанализированных автомобилей</h2>
+            <div class="table-responsive">
             <table class="cars-table">
                 <thead>
                     <tr>
@@ -246,6 +259,7 @@ class HTMLReportService:
                     {self._generate_cars_table_rows(cars_data, recommended_ids)}
                 </tbody>
             </table>
+            </div>
         </div>
 
         {self._format_full_analysis_section(full_analysis) if full_analysis else ""}
