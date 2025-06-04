@@ -16,6 +16,25 @@ class MonitorService:
         self.telegram = TelegramService()
         self.analysis = AnalysisService()  # ДОБАВЛЕНО
 
+    async def _is_urgent(self, text: str) -> bool:
+        """Проверка текста на признаки срочной продажи через AI"""
+        if not text:
+            return False
+        # Сначала быстрый ключевой фильтр
+        keywords = [
+            "срочно", "urgent", "быстро", "price drop", "недорого", "must sell"
+        ]
+        text_lower = text.lower()
+        if any(k in text_lower for k in keywords):
+            return True
+
+        # Если ключевых слов нет, используем AI определение
+        try:
+            return await self.analysis.openai_service.detect_urgent_sale(text)
+        except Exception as e:
+            logger.error(f"AI urgent detection error: {e}")
+            return False
+
     async def _process_filter(self, filter_name: str, repo: CarRepository) -> int:
         """Скрапинг и обработка одного фильтра"""
         try:
@@ -28,7 +47,8 @@ class MonitorService:
                 if not existing_car:
                     new_car = await repo.create(car_data)
                     logger.info(f"Новая машина добавлена: {new_car.title}")
-                    await self.telegram.send_new_car_notification(new_car)
+                    urgent = await self._is_urgent(new_car.description or "")
+                    await self.telegram.send_new_car_notification(new_car, urgent=urgent)
                     await repo.mark_as_notified(new_car.id)
                     new_cars_count += 1
 

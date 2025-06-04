@@ -18,6 +18,7 @@ class Car(Base):
     year = Column(Integer, index=True)
     mileage = Column(Integer, index=True)
     features = Column(Text)
+    description = Column(Text)
     date_posted = Column(String(100))
     place = Column(String(200))
     filter_name = Column(String(50), index=True)

@@ -13,6 +13,7 @@ class CarBase(BaseModel):
     year: Optional[int] = None
     mileage: Optional[int] = None
     features: Optional[str] = None
+    description: Optional[str] = None
     date_posted: Optional[str] = None
     place: Optional[str] = None
     filter_name: str

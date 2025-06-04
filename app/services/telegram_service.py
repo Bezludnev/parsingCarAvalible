@@ -19,9 +19,9 @@ class TelegramService:
         self.html_service = HTMLReportService()
         self.MAX_MESSAGE_LENGTH = 4000  # Безопасный лимит для Telegram
 
-    async def send_new_car_notification(self, car: Car):
+    async def send_new_car_notification(self, car: Car, urgent: bool = False):
         """Отправляет уведомление о новой машине"""
-        message = self._format_car_message(car)
+        message = self._format_car_message(car, urgent)
         try:
             await self.bot.send_message(
                 chat_id=settings.telegram_chat_id,
@@ -294,10 +294,11 @@ class TelegramService:
         except Exception as e:
             logger.error(f"❌ Не удалось отправить уведомление об ошибке: {e}")
 
-    def _format_car_message(self, car: Car) -> str:
+    def _format_car_message(self, car: Car, urgent: bool = False) -> str:
         """Форматирует сообщение о новой машине"""
+        header = "🔥 <b>СРОЧНО!</b> " if urgent else ""
         return f"""
-🚗 <b>Новое объявление - {car.brand}</b>
+{header}🚗 <b>Новое объявление - {car.brand}</b>
 
 📝 <b>Заголовок:</b> {car.title}
 💰 <b>Цена:</b> {car.price}
@@ -309,6 +310,8 @@ class TelegramService:
 🔗 <a href="{car.link}">Посмотреть объявление</a>
 
 ⚙️ <b>Характеристики:</b> {car.features}
+
+📝 <b>Описание:</b> {car.description or 'нет описания'}
         """.strip()
 
     async def close(self):
