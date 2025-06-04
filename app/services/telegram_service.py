@@ -181,6 +181,7 @@ class TelegramService:
             filter_name = analysis_result.get("filter_name", "машин")
             total_cars = analysis_result.get("total_cars", 0)
             quick_rec = analysis_result.get("quick_recommendation", "Нет рекомендации")
+            rec_link = analysis_result.get("recommended_link")
 
             # Обрезаем рекомендацию если слишком длинная
             if len(quick_rec) > 200:
@@ -193,6 +194,12 @@ class TelegramService:
 
 🤖 <b>Рекомендация:</b>
 {quick_rec}
+"""
+
+            if rec_link:
+                message += f"\n🔗 <a href=\"{rec_link}\">Посмотреть объявление</a>"
+
+            message += """
 
 💡 <i>Для детального анализа используйте /analysis</i>
 """
