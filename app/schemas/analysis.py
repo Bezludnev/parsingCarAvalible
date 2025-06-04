@@ -47,8 +47,10 @@ class AnalysisResponse(BaseModel):
 
 class QuickAnalysisResponse(BaseModel):
     """Краткий анализ для быстрого просмотра"""
+    success: bool
+    filter_name: str
     total_cars: int
-    top_3_recommendations: List[str]
-    average_price_range: str
-    best_value_car: Optional[CarSummary] = None
-    analysis_summary: str
+    quick_recommendation: str
+    recommended_link: Optional[str] = None
+    analysis_type: str
+    error: Optional[str] = None

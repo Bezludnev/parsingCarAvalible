@@ -4,6 +4,7 @@ from app.services.openai_service import OpenAIService
 from app.repository.car_repository import CarRepository
 from app.database import async_session
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -121,11 +122,23 @@ class AnalysisService:
                 # Используем быстрый метод OpenAI service
                 quick_rec = await self.openai_service.get_quick_recommendation(cars)
 
+                # Пытаемся извлечь номер рекомендованного автомобиля из текста
+                recommended_link = None
+                match = re.search(r"#(\d+)", quick_rec)
+                if match:
+                    try:
+                        idx = int(match.group(1)) - 1
+                        if 0 <= idx < len(cars):
+                            recommended_link = cars[idx].link
+                    except Exception:
+                        recommended_link = None
+
                 return {
                     "success": True,
                     "filter_name": filter_name,
                     "total_cars": len(cars),
                     "quick_recommendation": quick_rec,
+                    "recommended_link": recommended_link,
                     "analysis_type": "quick_insight"
                 }
 
