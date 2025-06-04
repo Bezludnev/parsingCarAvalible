@@ -2,9 +2,11 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import re
-import time
 import asyncio
 from typing import List, Dict, Optional
 from app.config import settings
@@ -140,7 +142,11 @@ class ScraperService:
         driver = self._create_driver()
         try:
             driver.get(filter_config["url"])
-            time.sleep(5)
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "div.advert.js-item-listing")
+                )
+            )
 
             html = driver.page_source
             soup = BeautifulSoup(html, "html.parser")
@@ -168,3 +174,4 @@ class ScraperService:
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._scrape_cars_sync, filter_config)
+
