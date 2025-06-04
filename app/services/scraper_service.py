@@ -1,4 +1,4 @@
-# app/services/scraper_service.py
+# app/services/scraper_service.py - ОБНОВЛЕННАЯ с urgent поддержкой
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -12,6 +12,9 @@ from typing import List, Dict, Optional
 from app.config import settings
 from app.schemas.car import CarCreate
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ScraperService:
@@ -36,13 +39,26 @@ class ScraperService:
                     return ' '.join(paragraphs)
         except Exception:
             return None
-
         return None
 
     def _create_driver(self) -> webdriver.Chrome:
         """Create Chrome driver using path from settings"""
         service = Service(executable_path=settings.chromedriver_path)
         return webdriver.Chrome(service=service, options=self.options)
+
+    def _has_urgent_keywords(self, text: str) -> bool:
+        """Проверяет наличие urgent ключевых слов в тексте"""
+        if not text:
+            return False
+
+        urgent_keywords = [
+            'срочно', 'urgent', 'быстро', 'asap', 'must sell', 'price drop',
+            'reduced', 'negotiable', 'open to offers', 'торг', 'обмен',
+            'выгодно', 'недорого', 'дешево', 'снижена цена', 'уместен торг'
+        ]
+
+        text_lower = text.lower()
+        return any(keyword in text_lower for keyword in urgent_keywords)
 
     def _parse_car_data(self, ad, filter_config: Dict) -> Optional[CarCreate]:
         # Title и link
@@ -115,12 +131,36 @@ class ScraperService:
         if not description:
             description = self._fetch_description(link)
 
-        # Apply filters
-        if year and year < filter_config.get("min_year", 0):
-            return None
+        # 🔥 URGENT MODE LOGIC - более мягкие фильтры
+        is_urgent_mode = filter_config.get("urgent_mode", False)
 
-        if mileage and mileage > filter_config.get("max_mileage", float('inf')):
-            return None
+        if is_urgent_mode:
+            # В urgent режиме проверяем ключевые слова
+            has_urgent_text = self._has_urgent_keywords(title) or self._has_urgent_keywords(description)
+
+            # Более мягкие ограничения для urgent
+            if year and year < filter_config.get("min_year", 0):
+                # В urgent режиме позволяем машины на 2 года старше
+                if year < (filter_config.get("min_year", 0) - 2):
+                    return None
+
+            if mileage and mileage > filter_config.get("max_mileage", float('inf')):
+                # В urgent режиме позволяем +50k пробега если есть urgent keywords
+                max_allowed = filter_config.get("max_mileage", float('inf'))
+                if has_urgent_text:
+                    max_allowed += 50000  # Бонус для urgent объявлений
+                if mileage > max_allowed:
+                    return None
+
+            logger.info(f"🔥 Urgent режим: {filter_config.get('filter_name')} - найдена машина"
+                        f" {'(URGENT keywords!)' if has_urgent_text else ''}")
+        else:
+            # Обычная логика фильтрации
+            if year and year < filter_config.get("min_year", 0):
+                return None
+
+            if mileage and mileage > filter_config.get("max_mileage", float('inf')):
+                return None
 
         return CarCreate(
             title=title,
@@ -138,6 +178,11 @@ class ScraperService:
 
     def _scrape_cars_sync(self, filter_config: Dict) -> List[CarCreate]:
         """Synchronous scraping logic executed in a thread"""
+        is_urgent = filter_config.get("urgent_mode", False)
+        filter_name = filter_config.get("filter_name", "unknown")
+
+        logger.info(f"🌐 Начинаем скрапинг: {filter_name} "
+                    f"{'(URGENT режим)' if is_urgent else '(обычный режим)'}")
 
         driver = self._create_driver()
         try:
@@ -152,12 +197,15 @@ class ScraperService:
             soup = BeautifulSoup(html, "html.parser")
             ads = soup.find_all("div", class_="advert js-item-listing")
 
+            logger.info(f"📄 Найдено {len(ads)} объявлений на странице для {filter_name}")
+
             cars = []
             for ad in ads:
                 car_data = self._parse_car_data(ad, filter_config)
                 if car_data:
                     cars.append(car_data)
 
+            logger.info(f"✅ Отфильтровано: {len(cars)} машин для {filter_name}")
             return cars
 
         finally:
@@ -165,9 +213,9 @@ class ScraperService:
 
     async def scrape_cars(self, filter_name: str) -> List[CarCreate]:
         """Public async method that offloads work to a thread"""
-
         filter_config = settings.car_filters.get(filter_name)
         if not filter_config:
+            logger.warning(f"❌ Фильтр {filter_name} не найден в конфигурации")
             return []
 
         filter_config["filter_name"] = filter_name
@@ -175,3 +223,32 @@ class ScraperService:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._scrape_cars_sync, filter_config)
 
+
+    async def get_available_filters(self) -> Dict[str, Dict]:
+        """Возвращает доступные фильтры с информацией о режиме"""
+        filters_info = {}
+
+        for name, config in settings.car_filters.items():
+            filters_info[name] = {
+                "brand": config["brand"],
+                "min_year": config["min_year"],
+                "max_mileage": config["max_mileage"],
+                "urgent_mode": config.get("urgent_mode", False),
+                "price_range": self._extract_price_range(config["url"])
+            }
+
+        return filters_info
+
+    def _extract_price_range(self, url: str) -> str:
+        """Извлекает ценовой диапазон из URL"""
+        try:
+            price_min_match = re.search(r'price_min=(\d+)', url)
+            price_max_match = re.search(r'price_max=(\d+)', url)
+
+            if price_min_match and price_max_match:
+                min_price = int(price_min_match.group(1))
+                max_price = int(price_max_match.group(1))
+                return f"€{min_price:,} - €{max_price:,}"
+        except:
+            pass
+        return "неизвестно"
