@@ -9,6 +9,7 @@ import asyncio
 from typing import List, Dict, Optional
 from app.config import settings
 from app.schemas.car import CarCreate
+import httpx
 
 
 class ScraperService:
@@ -18,6 +19,23 @@ class ScraperService:
         self.options.add_argument('--disable-gpu')
         self.options.add_argument('--no-sandbox')
         self.options.add_argument('--disable-dev-shm-usage')
+
+    def _fetch_description(self, link: str) -> Optional[str]:
+        """Загружает страницу объявления и извлекает описание"""
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(link)
+                if resp.status_code != 200:
+                    return None
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                desc_div = soup.find('div', class_='js-description')
+                if desc_div:
+                    paragraphs = [p.get_text(' ', strip=True) for p in desc_div.find_all('p')]
+                    return ' '.join(paragraphs)
+        except Exception:
+            return None
+
+        return None
 
     def _create_driver(self) -> webdriver.Chrome:
         """Create Chrome driver using path from settings"""
@@ -87,6 +105,14 @@ class ScraperService:
             if place_tag:
                 place = place_tag.text.strip()
 
+        # Description
+        desc_tag = ad.find("div", class_="advert__description")
+        if not desc_tag:
+            desc_tag = ad.find("div", class_="advert__content-description")
+        description = desc_tag.text.strip() if desc_tag else None
+        if not description:
+            description = self._fetch_description(link)
+
         # Apply filters
         if year and year < filter_config.get("min_year", 0):
             return None
@@ -102,6 +128,7 @@ class ScraperService:
             year=year,
             mileage=mileage,
             features=' | '.join(features) if features else "нет данных",
+            description=description,
             date_posted=date_posted,
             place=place,
             filter_name=filter_config.get("filter_name", "unknown")
