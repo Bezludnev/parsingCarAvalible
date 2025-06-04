@@ -1,5 +1,3 @@
-# docker-compose.yml - ОБНОВЛЕННАЯ с reports volume
-version: '3.8'
 
 services:
   mysql:
