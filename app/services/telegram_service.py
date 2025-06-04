@@ -1,4 +1,4 @@
-# app/services/telegram_service.py - ОПТИМИЗИРОВАННАЯ ВЕРСИЯ с HTML отчетами
+# app/services/telegram_service.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
@@ -19,9 +19,9 @@ class TelegramService:
         self.html_service = HTMLReportService()
         self.MAX_MESSAGE_LENGTH = 4000  # Безопасный лимит для Telegram
 
-    async def send_new_car_notification(self, car: Car, urgent: bool = False):
+    async def send_new_car_notification(self, car: Car, urgent: bool = False, urgent_filter: bool = False):
         """Отправляет уведомление о новой машине"""
-        message = self._format_car_message(car, urgent)
+        message = self._format_car_message(car, urgent, urgent_filter)
         try:
             await self.bot.send_message(
                 chat_id=settings.telegram_chat_id,
@@ -29,7 +29,8 @@ class TelegramService:
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False
             )
-            logger.info(f"✅ Уведомление отправлено для машины ID: {car.id}")
+            urgent_status = "🔥 URGENT" if urgent or urgent_filter else "обычное"
+            logger.info(f"✅ {urgent_status} уведомление отправлено для машины ID: {car.id}")
         except TelegramAPIError as e:
             logger.error(f"❌ Telegram API ошибка для машины ID {car.id}: {e}")
             raise
@@ -37,7 +38,7 @@ class TelegramService:
             logger.error(f"❌ Неожиданная ошибка отправки уведомления для машины ID {car.id}: {e}")
             raise
 
-    async def send_ai_analysis_report(self, analysis_result: Dict[str, Any]):
+    async def send_ai_analysis_report(self, analysis_result: Dict[str, Any], urgent_mode: bool = False):
         """🤖 Отправляет AI анализ: краткую выжимку + HTML отчет"""
         try:
             if not analysis_result.get("success", True):
@@ -54,7 +55,7 @@ class TelegramService:
             report_filename = os.path.basename(html_file_path)
 
             # 2. Отправляем краткую выжимку
-            summary_message = self._create_analysis_summary(analysis_result, report_filename)
+            summary_message = self._create_analysis_summary(analysis_result, report_filename, urgent_mode)
 
             await self.bot.send_message(
                 chat_id=settings.telegram_chat_id,
@@ -89,7 +90,8 @@ class TelegramService:
             logger.error(f"❌ Ошибка отправки AI анализа: {e}")
             await self._send_error_notification(f"Ошибка создания отчета: {str(e)}")
 
-    def _create_analysis_summary(self, analysis_result: Dict[str, Any], report_filename: str) -> str:
+    def _create_analysis_summary(self, analysis_result: Dict[str, Any], report_filename: str,
+                                 urgent_mode: bool = False) -> str:
         """Создает краткую выжимку для Telegram (в пределах лимита)"""
 
         # Базовая информация
@@ -99,9 +101,12 @@ class TelegramService:
         recommended_ids = analysis_result.get("recommended_car_ids", [])
 
         # Начинаем с заголовка
-        message = f"""🤖 <b>AI АНАЛИЗ ЗАВЕРШЕН</b>
+        urgent_emoji = "🔥🔥 " if urgent_mode else ""
+        urgent_text = "URGENT " if urgent_mode else ""
 
-📊 <b>Фильтр:</b> {filter_name.title()}
+        message = f"""{urgent_emoji}🤖 <b>{urgent_text}AI АНАЛИЗ ЗАВЕРШЕН</b>
+
+📊 <b>Фильтр:</b> {filter_name.title()} {'(🔥 URGENT режим)' if urgent_mode else ''}
 🚗 <b>Проанализировано:</b> {total_cars} машин
 ⭐ <b>Рекомендовано:</b> {len(recommended_ids)} машин
 🧠 <b>Модель:</b> {model_used}
@@ -172,7 +177,7 @@ class TelegramService:
 
         return short_text + "." if short_text and not short_text.endswith('.') else short_text
 
-    async def send_quick_analysis_notification(self, analysis_result: Dict[str, Any]):
+    async def send_quick_analysis_notification(self, analysis_result: Dict[str, Any], urgent_mode: bool = False):
         """⚡ Отправляет краткое уведомление о быстром анализе"""
         try:
             if not analysis_result.get("success", True):
@@ -187,9 +192,12 @@ class TelegramService:
             if len(quick_rec) > 200:
                 quick_rec = quick_rec[:200] + "..."
 
-            message = f"""⚡ <b>Быстрый AI анализ</b>
+            urgent_emoji = "🔥⚡ " if urgent_mode else "⚡ "
+            urgent_text = "URGENT " if urgent_mode else ""
 
-🎯 <b>Фильтр:</b> {filter_name.title()}
+            message = f"""{urgent_emoji}<b>{urgent_text}Быстрый AI анализ</b>
+
+🎯 <b>Фильтр:</b> {filter_name.title()} {'(🔥 URGENT)' if urgent_mode else ''}
 📊 <b>Машин:</b> {total_cars}
 
 🤖 <b>Рекомендация:</b>
@@ -210,10 +218,45 @@ class TelegramService:
                 parse_mode=ParseMode.HTML
             )
 
-            logger.info(f"✅ Быстрый анализ отправлен: {filter_name}")
+            logger.info(f"✅ Быстрый анализ отправлен: {filter_name} {'(URGENT)' if urgent_mode else ''}")
 
         except Exception as e:
             logger.error(f"❌ Ошибка отправки быстрого анализа: {e}")
+
+    async def send_urgent_summary(self, urgent_stats: Dict[str, int]):
+        """🔥 Отправляет сводку по urgent фильтрам"""
+        try:
+            total_urgent = sum(urgent_stats.values())
+
+            if total_urgent == 0:
+                return
+
+            message = f"""🔥🔥 <b>URGENT СВОДКА</b> 🔥🔥
+
+🚨 <b>Найдено {total_urgent} срочных объявлений!</b>
+
+"""
+
+            for filter_name, count in urgent_stats.items():
+                if count > 0:
+                    message += f"🔥 <b>{filter_name}:</b> {count} машин\n"
+
+            message += f"""
+
+⚡ <i>AI анализ запущен автоматически</i>
+🔗 <i>Детальные отчеты следуют...</i>
+"""
+
+            await self.bot.send_message(
+                chat_id=settings.telegram_chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML
+            )
+
+            logger.info(f"🔥 Urgent сводка отправлена: {total_urgent} машин из {len(urgent_stats)} фильтров")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки urgent сводки: {e}")
 
     async def send_analysis_summary(self, summaries: List[Dict[str, Any]]):
         """📊 Отправляет сводку по всем фильтрам"""
@@ -221,16 +264,26 @@ class TelegramService:
             message = "📊 <b>СВОДКА AI АНАЛИЗА</b>\n\n"
 
             total_reports = 0
+            urgent_count = 0
+
             for summary in summaries:
                 filter_name = summary.get("filter_name", "неизвестно")
                 total_cars = summary.get("total_cars", 0)
                 success = summary.get("success", False)
 
+                # Проверяем если это urgent фильтр
+                filter_config = settings.car_filters.get(filter_name, {})
+                is_urgent = filter_config.get("urgent_mode", False)
+
                 status_emoji = "✅" if success else "❌"
-                message += f"{status_emoji} <b>{filter_name.title()}:</b> {total_cars} машин\n"
+                urgent_emoji = " 🔥" if is_urgent else ""
+
+                message += f"{status_emoji} <b>{filter_name.title()}{urgent_emoji}:</b> {total_cars} машин\n"
 
                 if success:
                     total_reports += 1
+                    if is_urgent:
+                        urgent_count += 1
                     quick_rec = summary.get("quick_recommendation", "")
                     if quick_rec:
                         rec_short = quick_rec[:60] + "..." if len(quick_rec) > 60 else quick_rec
@@ -239,6 +292,8 @@ class TelegramService:
                 message += "\n"
 
             message += f"📄 <b>Создано HTML отчетов:</b> {total_reports}\n"
+            if urgent_count > 0:
+                message += f"🔥 <b>Urgent отчетов:</b> {urgent_count}\n"
             message += "<i>🤖 Файлы отправлены отдельными сообщениями</i>"
 
             await self.bot.send_message(
@@ -247,7 +302,8 @@ class TelegramService:
                 parse_mode=ParseMode.HTML
             )
 
-            logger.info(f"✅ Сводка анализа отправлена: {len(summaries)} фильтров, {total_reports} отчетов")
+            logger.info(
+                f"✅ Сводка анализа отправлена: {len(summaries)} фильтров, {total_reports} отчетов, {urgent_count} urgent")
 
         except Exception as e:
             logger.error(f"❌ Ошибка отправки сводки: {e}")
@@ -294,11 +350,23 @@ class TelegramService:
         except Exception as e:
             logger.error(f"❌ Не удалось отправить уведомление об ошибке: {e}")
 
-    def _format_car_message(self, car: Car, urgent: bool = False) -> str:
+    def _format_car_message(self, car: Car, urgent: bool = False, urgent_filter: bool = False) -> str:
         """Форматирует сообщение о новой машине"""
-        header = "🔥 <b>СРОЧНО!</b> " if urgent else ""
+
+        # Определяем заголовок в зависимости от urgent статуса
+        if urgent and urgent_filter:
+            header = "🔥🔥 <b>DOUBLE URGENT!</b> "
+        elif urgent_filter:
+            header = "🔥 <b>URGENT ФИЛЬТР!</b> "
+        elif urgent:
+            header = "🔥 <b>СРОЧНО!</b> "
+        else:
+            header = ""
+
+        filter_suffix = f" (фильтр: {car.filter_name})" if urgent_filter else ""
+
         return f"""
-{header}🚗 <b>Новое объявление - {car.brand}</b>
+{header}🚗 <b>Новое объявление - {car.brand}</b>{filter_suffix}
 
 📝 <b>Заголовок:</b> {car.title}
 💰 <b>Цена:</b> {car.price}
