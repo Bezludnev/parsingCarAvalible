@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Install Chrome and ChromeDriver
 RUN apt-get update && apt-get install -y \
@@ -48,4 +48,4 @@ COPY . .
 # Устанавливаем права доступа для директорий
 RUN chmod -R 755 /app/reports /app/logs
 
-CMD ["python", "startup.py"]
+ENTRYPOINT ["python", "-m", "app.main"]
