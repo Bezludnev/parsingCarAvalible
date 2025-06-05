@@ -444,3 +444,33 @@ class OpenAIService:
             logger.error(f"Urgent sale detection failed: {e}")
 
         return False
+
+    async def detect_urgent_sale(self, text: str) -> bool:
+        """Определяет, есть ли в тексте признаки срочной продажи"""
+        if not text:
+            return False
+        prompt = (
+            "Ответь одним словом 'yes' или 'no'. "
+            "В описании объявления есть признаки срочной продажи?\n\n" + text
+        )
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/responses",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}"
+                    },
+                    json={"model": "o3-mini", "input": prompt},
+                    timeout=20.0,
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    answer = self._extract_response_text(result).lower()
+                    return "yes" in answer or "да" in answer
+
+        except Exception as e:
+            logger.error(f"Urgent sale detection failed: {e}")
+
+        return False
