@@ -85,6 +85,11 @@ db-reset: ## Reset database (DESTRUCTIVE)
 	sleep 10
 	docker-compose up -d $(SERVICE_NAME)
 
+.PHONY: migrate
+migrate: ## Apply Alembic migrations
+	@echo "📈 Updating database migrations..."
+	docker-compose exec $(SERVICE_NAME) alembic upgrade head
+
 ##@ Monitoring & Logs
 .PHONY: logs
 logs: ## Show all logs
