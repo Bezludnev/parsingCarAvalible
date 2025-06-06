@@ -64,7 +64,7 @@ class Settings(BaseSettings):
 
         # 🎯 BUDGET срочная продажа - дешевые варианты
         "budget_urgent": {
-            "url": "https://www.bazaraki.com/car-motorbikes-boats-and-parts/cars-trucks-and-vans/?price_min=2000&price_max=8000",
+            "url": "https://www.bazaraki.com/car-motorbikes-boats-and-parts/cars-trucks-and-vans/?price_min=6000&price_max=8000",
             "min_year": 2005,
             "max_mileage": 400000,
             "brand": "Budget",

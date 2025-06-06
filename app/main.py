@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         check_cars_with_night_pause,
         'interval',
-        minutes=7.5,  # базовый интервал
+        minutes=20.5,  # базовый интервал
         jitter=150,  # ±2.5 минуты в секундах (итого 5-10 мин)
         id='car_monitor'
     )
