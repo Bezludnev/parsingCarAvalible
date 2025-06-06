@@ -135,49 +135,49 @@ lint: ## Lint Python code
 .PHONY: check-health
 check-health: ## Check API health
 	@echo "🏥 Checking API health..."
-	curl -s http://localhost:8000/health | python -m json.tool || echo "API not responding"
+	curl -s http://localhost:8000/health | python3 -m json.tool || echo "API not responding"
 
 .PHONY: trigger-scraping
 trigger-scraping: ## Manual trigger car scraping
 	@echo "🔍 Triggering manual scraping..."
-	curl -X POST http://localhost:8000/cars/check-now | python -m json.tool
+	curl -X POST http://localhost:8000/cars/check-now | python3 -m json.tool
 
 ##@ AI Analysis (NEW)
 .PHONY: scheduled-analysis
 scheduled-analysis: ## Run scheduled AI analysis
 	@echo "🤖 Running scheduled AI analysis..."
-	curl -X POST http://localhost:8000/analysis/scheduled-analysis | python -m json.tool
+	curl -X POST http://localhost:8000/analysis/scheduled-analysis | python3 -m json.tool
 
 .PHONY: check-scheduler
 check-scheduler: ## Check scheduler status
 	@echo "⏰ Checking scheduler status..."
-	curl -s http://localhost:8000/analysis/scheduler-status | python -m json.tool
+	curl -s http://localhost:8000/analysis/scheduler-status | python3 -m json.tool
 
 .PHONY: full-market-analysis
 full-market-analysis: ## Run full market analysis
 	@echo "📊 Running full market analysis..."
-	curl -X POST http://localhost:8000/analysis/full-market | python -m json.tool
+	curl -X POST http://localhost:8000/analysis/full-market | python3 -m json.tool
 
 .PHONY: database-stats
 database-stats: ## Get database statistics
 	@echo "📊 Getting database statistics..."
-	curl -s http://localhost:8000/analysis/database-stats | python -m json.tool
+	curl -s http://localhost:8000/analysis/database-stats | python3 -m json.tool
 
 .PHONY: market-trends
 market-trends: ## Analyze market trends
 	@echo "📈 Analyzing market trends..."
-	curl -X POST "http://localhost:8000/analysis/market-trends?days=14" | python -m json.tool
+	curl -X POST "http://localhost:8000/analysis/market-trends?days=14" | python3 -m json.tool
 
 .PHONY: ai-status
 ai-status: ## Check AI service status
 	@echo "🤖 Checking AI service status..."
-	curl -s http://localhost:8000/analysis/status | python -m json.tool
+	curl -s http://localhost:8000/analysis/status | python3 -m json.tool
 
 ##@ Reports Management
 .PHONY: list-reports
 list-reports: ## List HTML reports
 	@echo "📋 Listing HTML reports..."
-	curl -s http://localhost:8000/reports/list | python -m json.tool
+	curl -s http://localhost:8000/reports/list | python3 -m json.tool
 
 .PHONY: reports-stats
 reports-stats: ## Get reports statistics
