@@ -531,4 +531,9 @@ class TelegramService:
 
     async def close(self):
         """Закрытие сессии Telegram бота"""
-        await self.bot.session.close()
+        try:
+            if hasattr(self.bot, 'session') and self.bot.session:
+                await self.bot.session.close()
+                logger.info("✅ Telegram bot session закрыта")
+        except Exception as e:
+            logger.error(f"❌ Ошибка закрытия Telegram session: {e}")
