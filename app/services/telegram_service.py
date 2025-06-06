@@ -1,4 +1,4 @@
-# app/services/telegram_service.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# app/services/telegram_service.py - С SCHEDULED АНАЛИЗОМ
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
@@ -7,6 +7,7 @@ from app.config import settings
 from app.models.car import Car
 from app.services.html_service import HTMLReportService
 from typing import Dict, Any, List
+from datetime import datetime
 import logging
 import os
 
@@ -37,6 +38,148 @@ class TelegramService:
         except Exception as e:
             logger.error(f"❌ Неожиданная ошибка отправки уведомления для машины ID {car.id}: {e}")
             raise
+
+    async def send_scheduled_analysis_report(self, analysis_result: Dict[str, Any]):
+        """🤖 Отправляет scheduled AI анализ базы данных"""
+        try:
+            if not analysis_result.get("success", True):
+                await self._send_error_notification(f"Scheduled анализ не удался: {analysis_result.get('error')}")
+                return
+
+            # Создаем HTML отчет
+            html_file_path = self.html_service.generate_analysis_report(analysis_result)
+            report_filename = os.path.basename(html_file_path)
+
+            # Специальное сообщение для scheduled анализа
+            current_time = datetime.now().strftime("%H:%M")
+            total_cars = analysis_result.get("total_cars_analyzed", 0)
+            recommended_count = len(analysis_result.get("recommended_car_ids", []))
+            brands_count = len(analysis_result.get("brands_analyzed", []))
+
+            message = f"""🤖 <b>SCHEDULED AI АНАЛИЗ</b> • {current_time}
+
+📊 <b>Полный анализ базы данных:</b>
+🚗 Проанализировано: {total_cars} автомобилей
+🏷️ Брендов: {brands_count}
+⭐ Лучших предложений: {recommended_count}
+
+💡 <b>Краткие выводы:</b>
+{self._extract_short_conclusions(analysis_result.get("general_conclusions", ""))[:300]}
+
+📄 <b>Полный отчет:</b> <code>{report_filename}</code>
+📎 <i>HTML файл с детальным анализом</i>
+
+🔍 <i>Следующий анализ: в {'09:00' if datetime.now().hour >= 18 else '18:00'}</i>
+"""
+
+            await self.bot.send_message(
+                chat_id=settings.telegram_chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
+
+            # Отправляем HTML файл
+            try:
+                html_file = FSInputFile(html_file_path, filename=report_filename)
+                await self.bot.send_document(
+                    chat_id=settings.telegram_chat_id,
+                    document=html_file,
+                    caption=f"📊 Scheduled анализ • {total_cars} машин • {recommended_count} рекомендаций"
+                )
+                logger.info(f"✅ Scheduled анализ отправлен: {report_filename}")
+
+            except Exception as e:
+                logger.error(f"❌ Ошибка отправки scheduled HTML: {e}")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки scheduled анализа: {e}")
+            await self._send_error_notification(f"Ошибка scheduled анализа: {str(e)}")
+
+    async def send_top_deals_notification(self, analysis_result: Dict[str, Any], recommended_ids: List[int]):
+        """💎 Отправляет уведомление о топовых предложениях"""
+        try:
+            if not recommended_ids:
+                return
+
+            cars_data = analysis_result.get("cars_data", [])
+            recommended_cars = [car for car in cars_data if car.get("id") in recommended_ids]
+
+            if not recommended_cars:
+                return
+
+            message = f"""💎 <b>ТОП ПРЕДЛОЖЕНИЯ ДНЯ</b>
+
+🎯 <b>Найдено {len(recommended_cars)} лучших вариантов:</b>
+
+"""
+
+            for i, car in enumerate(recommended_cars[:5], 1):  # Топ-5
+                car_id = car.get("id")
+                title = car.get("title", "")[:50] + ("..." if len(car.get("title", "")) > 50 else "")
+                brand = car.get("brand", "")
+                year = car.get("year", "")
+                price = car.get("price", "")
+                mileage = car.get("mileage")
+                link = car.get("link", "")
+
+                # Ищем описание с признаками хорошего предложения
+                description = car.get("description", "")
+                deal_indicators = self._extract_deal_indicators(description)
+
+                mileage_text = f"{mileage:,} км" if mileage else "н/д"
+
+                message += f"""<b>{i}. {brand} {year}</b>
+📝 {title}
+💰 {price} • 🛣 {mileage_text}
+{deal_indicators}
+🔗 <a href="{link}">Посмотреть</a>
+
+"""
+
+            message += f"""
+🤖 <i>Анализ основан на соотношении цена/качество, состоянии и описании</i>
+⏰ <i>Обновляется 2 раза в день</i>
+"""
+
+            await self.bot.send_message(
+                chat_id=settings.telegram_chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False
+            )
+
+            logger.info(f"✅ Топ предложения отправлены: {len(recommended_cars)} машин")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки топ предложений: {e}")
+
+    def _extract_deal_indicators(self, description: str) -> str:
+        """Извлекает индикаторы хорошего предложения из описания"""
+        if not description:
+            return "📋 <i>без описания</i>"
+
+        indicators = []
+        desc_lower = description.lower()
+
+        # Позитивные индикаторы
+        if any(word in desc_lower for word in ["срочно", "urgent", "переезд", "быстро"]):
+            indicators.append("🔥 срочно")
+        if any(word in desc_lower for word in ["отличное", "идеальное", "perfect", "excellent"]):
+            indicators.append("✨ отличное состояние")
+        if any(word in desc_lower for word in ["сервис", "то", "обслуживание", "service"]):
+            indicators.append("🔧 сервисная история")
+        if any(word in desc_lower for word in ["один владелец", "one owner", "первый"]):
+            indicators.append("👤 один владелец")
+        if any(word in desc_lower for word in ["снижена", "скидка", "reduced", "discount"]):
+            indicators.append("💸 снижена цена")
+
+        if indicators:
+            return "💡 " + " • ".join(indicators[:3])  # Максимум 3 индикатора
+        else:
+            # Показываем начало описания
+            desc_short = description[:80] + "..." if len(description) > 80 else description
+            return f"📝 <i>{desc_short}</i>"
 
     async def send_ai_analysis_report(self, analysis_result: Dict[str, Any], urgent_mode: bool = False):
         """🤖 Отправляет AI анализ: краткую выжимку + HTML отчет"""
@@ -337,6 +480,10 @@ class TelegramService:
 
         except Exception as e:
             logger.error(f"❌ Ошибка отправки списка отчетов: {e}")
+
+    async def send_error_notification(self, error_text: str):
+        """Отправляет уведомление об ошибке (public метод)"""
+        await self._send_error_notification(error_text)
 
     async def _send_error_notification(self, error_text: str):
         """Отправляет уведомление об ошибке"""

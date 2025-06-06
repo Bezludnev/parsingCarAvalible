@@ -142,15 +142,52 @@ trigger-scraping: ## Manual trigger car scraping
 	@echo "🔍 Triggering manual scraping..."
 	curl -X POST http://localhost:8000/cars/check-now | python -m json.tool
 
-.PHONY: ai-analysis
-ai-analysis: ## Run AI analysis for Mercedes
-	@echo "🤖 Running AI analysis..."
-	curl -X POST "http://localhost:8000/analysis/by-filter/mercedes?limit=10" | python -m json.tool
+##@ AI Analysis (NEW)
+.PHONY: scheduled-analysis
+scheduled-analysis: ## Run scheduled AI analysis
+	@echo "🤖 Running scheduled AI analysis..."
+	curl -X POST http://localhost:8000/analysis/scheduled-analysis | python -m json.tool
 
-.PHONY: quick-analysis
-quick-analysis: ## Quick AI analysis
-	@echo "⚡ Quick analysis..."
-	curl -s http://localhost:8000/analysis/quick/mercedes | python -m json.tool
+.PHONY: check-scheduler
+check-scheduler: ## Check scheduler status
+	@echo "⏰ Checking scheduler status..."
+	curl -s http://localhost:8000/analysis/scheduler-status | python -m json.tool
+
+.PHONY: full-market-analysis
+full-market-analysis: ## Run full market analysis
+	@echo "📊 Running full market analysis..."
+	curl -X POST http://localhost:8000/analysis/full-market | python -m json.tool
+
+.PHONY: database-stats
+database-stats: ## Get database statistics
+	@echo "📊 Getting database statistics..."
+	curl -s http://localhost:8000/analysis/database-stats | python -m json.tool
+
+.PHONY: market-trends
+market-trends: ## Analyze market trends
+	@echo "📈 Analyzing market trends..."
+	curl -X POST "http://localhost:8000/analysis/market-trends?days=14" | python -m json.tool
+
+.PHONY: ai-status
+ai-status: ## Check AI service status
+	@echo "🤖 Checking AI service status..."
+	curl -s http://localhost:8000/analysis/status | python -m json.tool
+
+##@ Reports Management
+.PHONY: list-reports
+list-reports: ## List HTML reports
+	@echo "📋 Listing HTML reports..."
+	curl -s http://localhost:8000/reports/list | python -m json.tool
+
+.PHONY: reports-stats
+reports-stats: ## Get reports statistics
+	@echo "📊 Getting reports statistics..."
+	curl -s http://localhost:8000/reports/stats | python -m json.tool
+
+.PHONY: cleanup-reports
+cleanup-reports: ## Clean old reports (7 days)
+	@echo "🗑️ Cleaning old reports..."
+	curl -X DELETE "http://localhost:8000/reports/cleanup?keep_days=7" | python -m json.tool
 
 ##@ Advanced
 .PHONY: backup-db
@@ -177,7 +214,7 @@ fresh: clear rebuild ## Complete fresh start (DESTRUCTIVE)
 quick: restart logs-app ## Quick restart and show logs
 
 .PHONY: status
-status: ps check-health ## Show status and health
+status: ps check-health ai-status ## Show status and health
 
 ##@ Development Workflow
 .PHONY: code-reload
@@ -188,3 +225,29 @@ code-reload: ## Reload code without full restart (fastest)
 
 .PHONY: dev-cycle
 dev-cycle: code-reload logs-app ## Development cycle: reload + logs
+
+##@ Scheduled Analysis Workflow
+.PHONY: test-ai-pipeline
+test-ai-pipeline: ## Test complete AI analysis pipeline
+	@echo "🧪 Testing AI analysis pipeline..."
+	@echo "1. Database stats..."
+	@make database-stats
+	@echo "\n2. Scheduled analysis..."
+	@make scheduled-analysis
+	@echo "\n3. Scheduler status..."
+	@make check-scheduler
+
+.PHONY: morning-routine
+morning-routine: ## Morning dev routine: status + AI analysis
+	@echo "🌅 Morning development routine..."
+	@make status
+	@make database-stats
+	@make scheduled-analysis
+
+.PHONY: deploy-check
+deploy-check: ## Pre-deployment checks
+	@echo "🚀 Pre-deployment checks..."
+	@make check-health
+	@make ai-status
+	@make check-scheduler
+	@make database-stats
