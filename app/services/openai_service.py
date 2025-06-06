@@ -486,6 +486,13 @@ class OpenAIService:
         # Извлекаем рекомендованные ID
         recommended_ids = self._extract_recommended_car_ids(top_recommendations, all_cars)
 
+        # Убираем бюджетные автомобили
+        budget_ids = {
+            car.id for car in all_cars
+            if (car.filter_name == "budget_urgent" or (car.brand and car.brand.lower() == "budget"))
+        }
+        recommended_ids = [cid for cid in recommended_ids if cid not in budget_ids]
+
         return {
             "total_cars_analyzed": len(all_cars),
             "market_overview": market_overview.strip(),
@@ -508,7 +515,9 @@ class OpenAIService:
                     "link": car.link,
                     "description": car.description[:200] + "..." if car.description and len(
                         car.description) > 200 else car.description
-                } for car in all_cars[:100]  # Ограничиваем для размера ответа
+                }
+                for car in all_cars[:100]
+                if car.id not in budget_ids
             ]
         }
 
