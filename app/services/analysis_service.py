@@ -13,13 +13,22 @@ class AnalysisService:
     def __init__(self):
         self.openai_service = OpenAIService()
 
+    def _remove_budget_cars(self, cars: List) -> List:
+        """Исключает бюджетные автомобили из списка"""
+        return [
+            car for car in cars
+            if (car.filter_name != "budget_urgent"
+                and (car.brand or "").lower() != "budget")
+        ]
+
     async def analyze_full_database(self, min_cars_per_brand: int = 5) -> Dict[str, Any]:
         """🎯 ОСНОВНОЙ МЕТОД: Анализ всей базы данных одним запросом"""
         async with async_session() as session:
             repo = CarRepository(session)
 
-            # Получаем все машины из базы
-            all_cars = await repo.get_all_cars_for_analysis()
+            # Получаем все машины из базы и исключаем бюджетные
+            all_cars_raw = await repo.get_all_cars_for_analysis()
+            all_cars = self._remove_budget_cars(all_cars_raw)
 
             if len(all_cars) < 10:
                 return {
@@ -74,9 +83,11 @@ class AnalysisService:
         async with async_session() as session:
             repo = CarRepository(session)
 
-            # Получаем все машины с группировкой по дням
-            all_cars = await repo.get_all_cars_for_analysis()
-            recent_cars = await repo.get_recent_cars(days, 500)
+            # Получаем все машины с группировкой по дням и исключаем бюджетные
+            all_cars_raw = await repo.get_all_cars_for_analysis()
+            recent_cars_raw = await repo.get_recent_cars(days, 500)
+            all_cars = self._remove_budget_cars(all_cars_raw)
+            recent_cars = self._remove_budget_cars(recent_cars_raw)
 
             if len(all_cars) < 20:
                 return {
