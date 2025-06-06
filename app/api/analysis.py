@@ -1,4 +1,4 @@
-# app/api/analysis.py - НОВЫЕ ENDPOINTS для анализа всей базы
+# app/api/analysis.py - С SCHEDULED ENDPOINTS
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from app.services.analysis_service import AnalysisService
 from app.schemas.analysis import (
@@ -7,13 +7,94 @@ from app.schemas.analysis import (
     RecentCarsRequest,
     QuickAnalysisResponse
 )
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analysis", tags=["AI Analysis"])
 
 
-# 🎯 НОВЫЕ ENDPOINTS ДЛЯ АНАЛИЗА ВСЕЙ БАЗЫ
+# 🤖 НОВЫЕ SCHEDULED ENDPOINTS
+
+@router.post("/scheduled-analysis")
+async def trigger_scheduled_analysis():
+    """🤖 Ручной запуск scheduled AI анализа (как если бы он был по расписанию)"""
+    try:
+        from app.services.analysis_service import AnalysisService
+        from app.services.telegram_service import TelegramService
+
+        analysis_service = AnalysisService()
+        telegram_service = TelegramService()
+
+        # Полный анализ базы данных
+        result = await analysis_service.analyze_full_database(min_cars_per_brand=3)
+
+        if not result.get("success", True):
+            raise HTTPException(status_code=404, detail=result.get("error", "Ошибка анализа"))
+
+        # Отправляем как scheduled анализ
+        await telegram_service.send_scheduled_analysis_report(result)
+
+        # Если есть рекомендации - отправляем топ предложения
+        recommended_ids = result.get("recommended_car_ids", [])
+        if recommended_ids:
+            await telegram_service.send_top_deals_notification(result, recommended_ids)
+
+        return {
+            "status": "success",
+            "analysis_type": "scheduled_manual",
+            "cars_analyzed": result.get("total_cars_analyzed", 0),
+            "brands_analyzed": len(result.get("brands_analyzed", [])),
+            "recommendations": len(recommended_ids),
+            "message": "Manual scheduled анализ выполнен и отправлен в Telegram"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Manual scheduled analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка manual scheduled анализа: {str(e)}")
+
+
+@router.get("/scheduler-status")
+async def get_scheduler_status():
+    """⏰ Статус планировщика AI анализа"""
+    try:
+        from app.main import scheduler
+
+        jobs = []
+        for job in scheduler.get_jobs():
+            next_run = job.next_run_time.strftime("%d.%m.%Y %H:%M:%S") if job.next_run_time else "не запланирован"
+            jobs.append({
+                "id": job.id,
+                "name": job.name or job.id,
+                "next_run": next_run,
+                "trigger": str(job.trigger)
+            })
+
+        # Информация о scheduled AI анализе
+        ai_job = next((job for job in jobs if "ai_analysis" in job["id"]), None)
+
+        return {
+            "scheduler_running": scheduler.running,
+            "all_jobs": jobs,
+            "ai_analysis_job": ai_job,
+            "timezone": "Europe/Nicosia",
+            "schedule": "09:00 и 18:00 по времени Кипра",
+            "current_time": datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+            "status": "operational" if ai_job else "no_ai_job"
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Scheduler status error: {e}")
+        return {
+            "scheduler_running": False,
+            "error": str(e),
+            "status": "error"
+        }
+
+
+# 🎯 ОСНОВНЫЕ ENDPOINTS ДЛЯ АНАЛИЗА БАЗЫ
 
 @router.post("/full-market", response_model=AnalysisResponse)
 async def analyze_full_market(
@@ -259,42 +340,6 @@ async def trigger_manual_analysis(filter_name: str = Query(default=None, descrip
         raise HTTPException(status_code=500, detail=f"Ошибка ручного анализа: {str(e)}")
 
 
-# 🚀 НОВЫЕ ENDPOINTS ДЛЯ АВТОМАТИЗАЦИИ
-
-@router.post("/schedule-full-analysis")
-async def schedule_full_market_analysis(
-        background_tasks: BackgroundTasks,
-        delay_minutes: int = Query(default=5, ge=1, le=60, description="Задержка запуска в минутах")
-):
-    """⏰ Запланировать полный анализ рынка через N минут"""
-    try:
-        # Добавляем задачу в фон с задержкой
-        import asyncio
-
-        async def delayed_analysis():
-            await asyncio.sleep(delay_minutes * 60)
-            service = AnalysisService()
-            result = await service.analyze_full_database()
-
-            if result.get("success"):
-                from app.services.telegram_service import TelegramService
-                telegram = TelegramService()
-                await telegram.send_ai_analysis_report(result, urgent_mode=False)
-
-        background_tasks.add_task(delayed_analysis)
-
-        return {
-            "status": "scheduled",
-            "analysis_type": "full_market",
-            "scheduled_in_minutes": delay_minutes,
-            "message": f"Полный анализ рынка запланирован через {delay_minutes} минут"
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Schedule analysis error: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка планирования анализа: {str(e)}")
-
-
 # 🔍 СИСТЕМНАЯ ИНФОРМАЦИЯ
 
 @router.get("/status")
@@ -325,6 +370,7 @@ async def get_analysis_status():
                 "analysis_ready": analysis_ready,
                 "recommended_endpoint": "/analysis/full-market" if analysis_ready else "/analysis/by-filter",
                 "features": [
+                    "scheduled_analysis",
                     "full_market_analysis",
                     "market_trends",
                     "database_statistics",
@@ -423,6 +469,11 @@ async def get_analysis_help():
     return {
         "message": "AI анализ оптимизирован для работы с полной базой данных",
         "new_features": {
+            "scheduled_analysis": {
+                "description": "Автоматический анализ 2 раза в день (09:00 и 18:00)",
+                "endpoint": "/analysis/scheduled-analysis",
+                "benefits": ["Регулярный поиск лучших сделок", "Анализ описаний", "HTML отчеты"]
+            },
             "full_market_analysis": {
                 "endpoint": "/analysis/full-market",
                 "description": "Анализ всего рынка одним запросом (экономия токенов)",
@@ -439,9 +490,16 @@ async def get_analysis_help():
                 "benefits": ["Мгновенные данные", "Без токенов", "Real-time insights"]
             }
         },
+        "scheduled_analysis": {
+            "frequency": "2 раза в день",
+            "schedule": "09:00 и 18:00 (Кипрское время)",
+            "focus": "Поиск лучших предложений с анализом описаний",
+            "outputs": ["HTML отчет", "Топ предложения дня", "Telegram уведомления"]
+        },
         "migration_guide": {
             "old_way": "Анализ каждого фильтра отдельно (/analysis/by-filter)",
             "new_way": "Анализ всей базы сразу (/analysis/full-market)",
+            "scheduled_way": "Автоматический поиск сделок (/analysis/scheduled-analysis)",
             "token_savings": "До 80% экономии токенов OpenAI",
             "better_insights": "Более полная картина рынка и трендов"
         },
@@ -449,6 +507,8 @@ async def get_analysis_help():
             "1. Проверьте статистику: GET /analysis/database-stats",
             "2. Если машин >= 20: POST /analysis/full-market",
             "3. Для трендов: POST /analysis/market-trends",
-            "4. Legacy фильтры: POST /analysis/by-filter/{filter_name}"
+            "4. Для поиска сделок: POST /analysis/scheduled-analysis",
+            "5. Проверьте расписание: GET /analysis/scheduler-status",
+            "6. Legacy фильтры: POST /analysis/by-filter/{filter_name}"
         ]
     }
