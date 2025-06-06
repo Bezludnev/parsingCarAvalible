@@ -44,7 +44,44 @@ class OpenAIService:
                     raise Exception(f"API Error {response.status_code}: {response.text}")
 
                 result = response.json()
+
+                # Проверяем статус ответа
+                status = result.get("status", "unknown")
+                logger.info(f"API response status: {status}")
+
+                if status == "in_progress":
+                    # Если анализ еще в процессе, ждем
+                    response_id = result.get("id")
+                    if response_id:
+                        logger.info(f"Response in progress, waiting for completion: {response_id}")
+                        # Ждем завершения
+                        for attempt in range(30):  # Максимум 5 минут ожидания
+                            await asyncio.sleep(10)
+
+                            check_response = await client.get(
+                                f"{self.base_url}/responses/{response_id}",
+                                headers={"Authorization": f"Bearer {self.api_key}"},
+                                timeout=30.0
+                            )
+
+                            if check_response.status_code == 200:
+                                check_result = check_response.json()
+                                check_status = check_result.get("status", "unknown")
+                                logger.info(f"Check attempt {attempt + 1}: {check_status}")
+
+                                if check_status == "completed":
+                                    result = check_result
+                                    break
+                                elif check_status in ["failed", "cancelled"]:
+                                    error = check_result.get("error", "Unknown error")
+                                    raise Exception(f"Analysis failed: {error}")
+                        else:
+                            raise Exception("Analysis timeout after 5 minutes")
+
                 analysis_text = self._extract_response_text(result)
+
+                if len(analysis_text) < 100:
+                    raise Exception(f"Response too short: {analysis_text}")
 
                 return self._parse_full_market_analysis(analysis_text, all_cars, brands_stats)
 
@@ -91,10 +128,13 @@ class OpenAIService:
 - Рекомендуй ТОП-10 лучших вариантов с обоснованием"""
 
         # Подготавливаем сводку по рынку
-        brands_info = "\n".join([
-            f"• {brand}: {data['count']} машин, средний год: {data['avg_year']:.0f if data['avg_year'] else 'н/д'}, средний пробег: {data['avg_mileage']:,.0f if data['avg_mileage'] else 'н/д'} км"
-            for brand, data in market_summary["brands_summary"].items()
-        ])
+        brands_info = []
+        for brand, data in market_summary["brands_summary"].items():
+            avg_year = f"{data['avg_year']:.0f}" if data['avg_year'] else 'н/д'
+            avg_mileage = f"{data['avg_mileage']:,.0f}" if data['avg_mileage'] else 'н/д'
+            brands_info.append(
+                f"• {brand}: {data['count']} машин, средний год: {avg_year}, средний пробег: {avg_mileage} км")
+        brands_info = "\n".join(brands_info)
 
         # Примеры машин для детального анализа (увеличиваем до 30 для лучшего поиска)
         sample_cars_info = []
@@ -213,12 +253,38 @@ class OpenAIService:
                     timeout=90.0
                 )
 
-                if response.status_code == 200:
-                    result = response.json()
-                    analysis_text = self._extract_response_text(result)
-                    return self._parse_trends_analysis(analysis_text, all_cars, recent_cars)
-                else:
-                    raise Exception(f"API Error {response.status_code}")
+                if response.status_code != 200:
+                    raise Exception(f"API Error {response.status_code}: {response.text}")
+
+                result = response.json()
+
+                # Проверяем статус и ждем завершения если нужно
+                status = result.get("status", "unknown")
+                if status == "in_progress":
+                    response_id = result.get("id")
+                    if response_id:
+                        for attempt in range(18):  # 3 минуты для trends анализа
+                            await asyncio.sleep(10)
+
+                            check_response = await client.get(
+                                f"{self.base_url}/responses/{response_id}",
+                                headers={"Authorization": f"Bearer {self.api_key}"},
+                                timeout=30.0
+                            )
+
+                            if check_response.status_code == 200:
+                                check_result = check_response.json()
+                                check_status = check_result.get("status", "unknown")
+
+                                if check_status == "completed":
+                                    result = check_result
+                                    break
+                                elif check_status in ["failed", "cancelled"]:
+                                    error = check_result.get("error", "Unknown error")
+                                    raise Exception(f"Trends analysis failed: {error}")
+
+                analysis_text = self._extract_response_text(result)
+                return self._parse_trends_analysis(analysis_text, all_cars, recent_cars)
 
         except Exception as e:
             logger.error(f"❌ Trends analysis error: {e}")
@@ -434,13 +500,39 @@ class OpenAIService:
                         "model": "o3-mini",
                         "input": input_text
                     },
-                    timeout=60.0
+                    timeout=90.0
                 )
 
                 if response.status_code != 200:
                     raise Exception(f"API Error {response.status_code}: {response.text}")
 
                 result = response.json()
+
+                # Ждем завершения если нужно
+                status = result.get("status", "unknown")
+                if status == "in_progress":
+                    response_id = result.get("id")
+                    if response_id:
+                        for attempt in range(18):  # 3 минуты для legacy анализа
+                            await asyncio.sleep(10)
+
+                            check_response = await client.get(
+                                f"{self.base_url}/responses/{response_id}",
+                                headers={"Authorization": f"Bearer {self.api_key}"},
+                                timeout=30.0
+                            )
+
+                            if check_response.status_code == 200:
+                                check_result = check_response.json()
+                                check_status = check_result.get("status", "unknown")
+
+                                if check_status == "completed":
+                                    result = check_result
+                                    break
+                                elif check_status in ["failed", "cancelled"]:
+                                    error = check_result.get("error", "Unknown error")
+                                    raise Exception(f"Legacy analysis failed: {error}")
+
                 analysis_text = self._extract_response_text(result)
                 return self._parse_analysis_response(analysis_text, cars)
 
@@ -449,30 +541,48 @@ class OpenAIService:
             raise Exception(f"Ошибка AI анализа: {str(e)}")
 
     def _extract_response_text(self, api_response: Dict) -> str:
-        """Извлекает текст из ответа API (без изменений)"""
+        """Извлекает текст из ответа API (улучшенная версия)"""
         try:
             logger.info(f"API Response structure: {list(api_response.keys())}")
 
-            if "text" in api_response:
-                text_value = api_response["text"]
-                if isinstance(text_value, dict):
-                    logger.info(f"Text dict content: {text_value}")
-                else:
-                    return str(text_value)
-
+            # Проверяем основные поля ответа
             if "output" in api_response:
                 output = api_response["output"]
-                if isinstance(output, list):
+                logger.info(f"Output type: {type(output)}")
+
+                if isinstance(output, list) and len(output) > 0:
                     for i, output_item in enumerate(output):
+                        logger.info(
+                            f"Output item {i}: {type(output_item)} - {list(output_item.keys()) if isinstance(output_item, dict) else 'not dict'}")
+
                         if isinstance(output_item, dict):
                             item_type = output_item.get("type", "unknown")
+                            logger.info(f"Item type: {item_type}")
+
                             if item_type == "message":
                                 if "content" in output_item:
                                     content_array = output_item["content"]
+                                    logger.info(
+                                        f"Content array type: {type(content_array)}, length: {len(content_array) if isinstance(content_array, list) else 'not list'}")
+
                                     if isinstance(content_array, list) and len(content_array) > 0:
-                                        for content_item in content_array:
+                                        for j, content_item in enumerate(content_array):
+                                            logger.info(
+                                                f"Content item {j}: {type(content_item)} - {list(content_item.keys()) if isinstance(content_item, dict) else content_item}")
+
                                             if isinstance(content_item, dict) and "text" in content_item:
-                                                return str(content_item["text"])
+                                                text_value = content_item["text"]
+                                                logger.info(f"Found text: {len(str(text_value))} characters")
+                                                return str(text_value)
+                elif isinstance(output, str):
+                    return output
+
+            # Проверяем поле 'reasoning' если есть
+            if "reasoning" in api_response:
+                reasoning = api_response["reasoning"]
+                if isinstance(reasoning, str) and len(reasoning) > 50:
+                    logger.info("Using reasoning field as response")
+                    return reasoning
 
             # Fallback - ищем любую длинную строку
             def find_long_strings(obj, path=""):
@@ -491,10 +601,16 @@ class OpenAIService:
                 return results
 
             long_strings = find_long_strings(api_response)
+            logger.info(f"Found {len(long_strings)} long strings")
+
+            for path, text in long_strings:
+                logger.info(f"Long string at {path}: {len(text)} chars")
+
             if long_strings:
                 return long_strings[0][1]
 
-            return str(api_response)
+            # Если ничего не найдено, возвращаем структурированную ошибку
+            return f"Не удалось извлечь текст из ответа API. Структура: {list(api_response.keys())}"
 
         except Exception as e:
             logger.error(f"Ошибка извлечения текста: {e}")
@@ -675,11 +791,36 @@ class OpenAIService:
                         "model": "o3-mini",
                         "input": input_text
                     },
-                    timeout=30.0
+                    timeout=60.0
                 )
 
                 if response.status_code == 200:
                     result = response.json()
+
+                    # Для быстрой рекомендации ждем меньше времени
+                    status = result.get("status", "unknown")
+                    if status == "in_progress":
+                        response_id = result.get("id")
+                        if response_id:
+                            for attempt in range(6):  # 1 минута для быстрой рекомендации
+                                await asyncio.sleep(10)
+
+                                check_response = await client.get(
+                                    f"{self.base_url}/responses/{response_id}",
+                                    headers={"Authorization": f"Bearer {self.api_key}"},
+                                    timeout=30.0
+                                )
+
+                                if check_response.status_code == 200:
+                                    check_result = check_response.json()
+                                    check_status = check_result.get("status", "unknown")
+
+                                    if check_status == "completed":
+                                        result = check_result
+                                        break
+                                    elif check_status in ["failed", "cancelled"]:
+                                        return "Быстрый анализ не удался"
+
                     return self._extract_response_text(result)
                 else:
                     return "Быстрый анализ недоступен"
@@ -700,18 +841,50 @@ class OpenAIService:
                     },
                     json={
                         "model": "o3-mini",
-                        "input": "Тест подключения к новому API"
+                        "input": "Ответь одним словом: 'Тест'"
                     },
-                    timeout=15.0
+                    timeout=60.0
                 )
 
                 if response.status_code == 200:
                     result = response.json()
+                    status = result.get("status", "unknown")
+
+                    if status == "in_progress":
+                        # Ждем завершения для теста
+                        response_id = result.get("id")
+                        if response_id:
+                            for attempt in range(12):  # 2 минуты ожидания для простого теста
+                                await asyncio.sleep(10)
+
+                                check_response = await client.get(
+                                    f"{self.base_url}/responses/{response_id}",
+                                    headers={"Authorization": f"Bearer {self.api_key}"},
+                                    timeout=30.0
+                                )
+
+                                if check_response.status_code == 200:
+                                    check_result = check_response.json()
+                                    check_status = check_result.get("status", "unknown")
+
+                                    if check_status == "completed":
+                                        result = check_result
+                                        break
+                                    elif check_status in ["failed", "cancelled"]:
+                                        error = check_result.get("error", "Unknown error")
+                                        return {
+                                            "status": "error",
+                                            "model": "o3-mini",
+                                            "error": f"Test failed: {error}"
+                                        }
+
+                    response_text = self._extract_response_text(result)
                     return {
                         "status": "success",
                         "model": "o3-mini",
                         "api_version": "responses_v1",
-                        "response": self._extract_response_text(result)
+                        "response": response_text,
+                        "api_status": result.get("status", "unknown")
                     }
                 else:
                     return {
@@ -761,10 +934,36 @@ class OpenAIService:
                         "Authorization": f"Bearer {self.api_key}"
                     },
                     json={"model": "o3-mini", "input": prompt},
-                    timeout=20.0,
+                    timeout=60.0,
                 )
+
                 if response.status_code == 200:
                     result = response.json()
+
+                    # Для простого вопроса ждем недолго
+                    status = result.get("status", "unknown")
+                    if status == "in_progress":
+                        response_id = result.get("id")
+                        if response_id:
+                            for attempt in range(6):  # 1 минута для urgent detection
+                                await asyncio.sleep(10)
+
+                                check_response = await client.get(
+                                    f"{self.base_url}/responses/{response_id}",
+                                    headers={"Authorization": f"Bearer {self.api_key}"},
+                                    timeout=30.0
+                                )
+
+                                if check_response.status_code == 200:
+                                    check_result = check_response.json()
+                                    check_status = check_result.get("status", "unknown")
+
+                                    if check_status == "completed":
+                                        result = check_result
+                                        break
+                                    elif check_status in ["failed", "cancelled"]:
+                                        return False  # Если анализ не удался, считаем не urgent
+
                     answer = self._extract_response_text(result).lower()
                     return "yes" in answer or "да" in answer
         except Exception as e:

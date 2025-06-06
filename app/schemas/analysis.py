@@ -1,9 +1,11 @@
-# app/schemas/analysis.py - ОБНОВЛЕННАЯ с поддержкой описаний
-from pydantic import BaseModel
+# app/schemas/analysis.py - ИСПРАВЛЕН PYDANTIC WARNING
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional, Dict, Any
 
 
 class CarSummary(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     id: int
     title: str
     brand: str
@@ -15,6 +17,8 @@ class CarSummary(BaseModel):
 
 
 class AnalysisRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     filter_name: Optional[str] = None
     car_ids: Optional[List[int]] = None
     brand: Optional[str] = None
@@ -22,27 +26,37 @@ class AnalysisRequest(BaseModel):
 
 
 class ComparisonRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     car_ids: List[int]
 
 
 class RecentCarsRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     days: int = 7
     limit: int = 30
 
 
 class FullMarketAnalysisRequest(BaseModel):
     """Запрос для полного анализа рынка"""
+    model_config = ConfigDict(protected_namespaces=())
+
     min_cars_per_brand: int = 5
     include_descriptions: bool = True  # Включать ли описания в анализ
 
 
 class MarketTrendsRequest(BaseModel):
     """Запрос для анализа трендов рынка"""
+    model_config = ConfigDict(protected_namespaces=())
+
     days: int = 14
     include_recent_descriptions: bool = True
 
 
 class AnalysisResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     total_cars_analyzed: int
     analysis_type: str
     cars_data: List[CarSummary]
@@ -86,6 +100,8 @@ class AnalysisResponse(BaseModel):
 
 class QuickAnalysisResponse(BaseModel):
     """Краткий анализ для быстрого просмотра"""
+    model_config = ConfigDict(protected_namespaces=())
+
     success: bool
     filter_name: str
     total_cars: int
@@ -97,6 +113,8 @@ class QuickAnalysisResponse(BaseModel):
 
 class DatabaseStatsResponse(BaseModel):
     """Статистика по базе данных"""
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
     global_statistics: Dict[str, Any]
     recent_week_statistics: Dict[str, Any]
@@ -111,6 +129,8 @@ class DatabaseStatsResponse(BaseModel):
 
 class MarketSummaryResponse(BaseModel):
     """Быстрая сводка по рынку"""
+    model_config = ConfigDict(protected_namespaces=())
+
     success: bool
     analysis_type: str
     total_cars_in_db: int
@@ -125,9 +145,11 @@ class MarketSummaryResponse(BaseModel):
 
 class AnalysisStatusResponse(BaseModel):
     """Статус системы анализа"""
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
     ai_service: str
-    model: str
+    model_used: str  # Renamed from model to model_used to avoid conflict
     database_cars: int
     analysis_ready: bool
     recommended_endpoint: str
