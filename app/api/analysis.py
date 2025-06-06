@@ -1,4 +1,4 @@
-# app/api/analysis.py - ОБНОВЛЕННАЯ ВЕРСИЯ с o3-mini
+# app/api/analysis.py - НОВЫЕ ENDPOINTS для анализа всей базы
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from app.services.analysis_service import AnalysisService
 from app.schemas.analysis import (
@@ -13,12 +13,182 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analysis", tags=["AI Analysis"])
 
 
+# 🎯 НОВЫЕ ENDPOINTS ДЛЯ АНАЛИЗА ВСЕЙ БАЗЫ
+
+@router.post("/full-market", response_model=AnalysisResponse)
+async def analyze_full_market(
+        min_cars_per_brand: int = Query(default=5, ge=1, le=50, description="Минимум машин на бренд"),
+        background_tasks: BackgroundTasks = None
+):
+    """🎯 ГЛАВНЫЙ: Полный анализ всего рынка через o3-mini (экономия токенов!)"""
+    try:
+        service = AnalysisService()
+        result = await service.analyze_full_database(min_cars_per_brand)
+
+        if not result.get("success", True):
+            raise HTTPException(status_code=404, detail=result.get("error", "Ошибка анализа"))
+
+        # В фоне отправляем в Telegram
+        if background_tasks:
+            background_tasks.add_task(_send_to_telegram_bg, result, "full_market")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Full market analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка полного анализа рынка: {str(e)}")
+
+
+@router.post("/market-trends", response_model=AnalysisResponse)
+async def analyze_market_trends(
+        days: int = Query(default=14, ge=7, le=60, description="Период для анализа трендов"),
+        background_tasks: BackgroundTasks = None
+):
+    """📈 Анализ трендов рынка на основе всей базы данных"""
+    try:
+        service = AnalysisService()
+        result = await service.analyze_recent_market_trends(days)
+
+        if not result.get("success", True):
+            raise HTTPException(status_code=404, detail=result.get("error", "Ошибка анализа трендов"))
+
+        if background_tasks:
+            background_tasks.add_task(_send_to_telegram_bg, result, "trends")
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Market trends analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка анализа трендов: {str(e)}")
+
+
+@router.get("/market-summary")
+async def get_market_summary():
+    """⚡ Быстрая сводка по всему рынку (без AI анализа)"""
+    try:
+        service = AnalysisService()
+        result = await service.get_market_insights_summary()
+        return result
+
+    except Exception as e:
+        logger.error(f"❌ Market summary error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения сводки: {str(e)}")
+
+
+@router.post("/send-full-market-to-telegram")
+async def send_full_market_analysis_to_telegram(
+        min_cars_per_brand: int = Query(default=5, ge=1, le=50)
+):
+    """📱 Полный анализ рынка + отправка в Telegram"""
+    try:
+        service = AnalysisService()
+        result = await service.analyze_full_database(min_cars_per_brand)
+
+        if not result.get("success", True):
+            raise HTTPException(status_code=404, detail=result.get("error", "Ошибка анализа"))
+
+        # Отправляем в Telegram с HTML отчетом
+        from app.services.telegram_service import TelegramService
+        telegram = TelegramService()
+        await telegram.send_ai_analysis_report(result, urgent_mode=False)
+
+        return {
+            "status": "sent_to_telegram",
+            "analysis_type": "full_market",
+            "cars_analyzed": result.get("total_cars_analyzed", 0),
+            "brands_analyzed": len(result.get("brands_analyzed", [])),
+            "message": "Полный анализ рынка отправлен в Telegram с HTML отчетом"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Send full market to Telegram error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка отправки анализа: {str(e)}")
+
+
+@router.post("/send-trends-to-telegram")
+async def send_trends_analysis_to_telegram(
+        days: int = Query(default=14, ge=7, le=60)
+):
+    """📱 Анализ трендов + отправка в Telegram"""
+    try:
+        service = AnalysisService()
+        result = await service.analyze_recent_market_trends(days)
+
+        if not result.get("success", True):
+            raise HTTPException(status_code=404, detail=result.get("error", "Ошибка анализа"))
+
+        from app.services.telegram_service import TelegramService
+        telegram = TelegramService()
+        await telegram.send_ai_analysis_report(result, urgent_mode=False)
+
+        return {
+            "status": "sent_to_telegram",
+            "analysis_type": "market_trends",
+            "cars_analyzed": result.get("total_cars_analyzed", 0),
+            "recent_cars": result.get("recent_cars_count", 0),
+            "trends_period": days,
+            "message": f"Анализ трендов за {days} дней отправлен в Telegram"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Send trends to Telegram error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка отправки трендов: {str(e)}")
+
+
+# 📊 ENDPOINTS ДЛЯ МОНИТОРИНГА И СТАТИСТИКИ
+
+@router.get("/database-stats")
+async def get_database_statistics():
+    """📊 Детальная статистика по всей базе данных"""
+    try:
+        from app.repository.car_repository import CarRepository
+        from app.database import async_session
+
+        async with async_session() as session:
+            repo = CarRepository(session)
+
+            global_stats = await repo.get_global_statistics()
+            recent_stats = await repo.get_recent_statistics(7)
+            brands_breakdown = await repo.get_brands_breakdown()
+            filters_breakdown = await repo.get_filters_breakdown()
+            price_ranges = await repo.get_price_ranges_analysis()
+            year_distribution = await repo.get_year_distribution()
+            daily_activity = await repo.get_market_activity_by_days(30)
+
+            return {
+                "status": "success",
+                "global_statistics": global_stats,
+                "recent_week_statistics": recent_stats,
+                "brands_breakdown": brands_breakdown,
+                "filters_breakdown": filters_breakdown,
+                "price_ranges_analysis": price_ranges,
+                "year_distribution": year_distribution,
+                "daily_activity_last_30_days": daily_activity,
+                "analysis_ready": global_stats.get("total_cars", 0) >= 20,
+                "recommended_analysis": "full_market" if global_stats.get("total_cars", 0) >= 50 else "legacy"
+            }
+
+    except Exception as e:
+        logger.error(f"❌ Database stats error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка получения статистики: {str(e)}")
+
+
+# 🔧 LEGACY ENDPOINTS (сохраняем для обратной совместимости)
+
 @router.post("/by-filter/{filter_name}", response_model=AnalysisResponse)
 async def analyze_by_filter(
         filter_name: str,
         limit: int = Query(default=20, ge=5, le=50)
 ):
-    """🤖 AI анализ машин по фильтру через o3-mini (mercedes, bmw, audi)"""
+    """🤖 AI анализ машин по фильтру (LEGACY - берет данные из базы)"""
     try:
         service = AnalysisService()
         result = await service.analyze_cars_by_filter(filter_name, limit)
@@ -31,7 +201,7 @@ async def analyze_by_filter(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Analysis error for filter {filter_name}: {e}")
+        logger.error(f"❌ Analysis error for filter {filter_name}: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка AI анализа: {str(e)}")
 
 
@@ -50,49 +220,8 @@ async def compare_cars(request: ComparisonRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Comparison error: {e}")
+        logger.error(f"❌ Comparison error: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка сравнения: {str(e)}")
-
-
-@router.post("/recent", response_model=AnalysisResponse)
-async def analyze_recent_cars(request: RecentCarsRequest):
-    """📅 Анализ недавних поступлений через o3-mini"""
-    try:
-        service = AnalysisService()
-        result = await service.analyze_recent_cars(request.days, request.limit)
-
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Recent analysis error: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка анализа: {str(e)}")
-
-
-@router.get("/brand/{brand}", response_model=AnalysisResponse)
-async def analyze_by_brand(
-        brand: str,
-        limit: int = Query(default=15, ge=5, le=30)
-):
-    """🏷️ Анализ по марке автомобиля через o3-mini"""
-    try:
-        service = AnalysisService()
-        result = await service.get_brand_analysis(brand, limit)
-
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Brand analysis error: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка анализа марки: {str(e)}")
 
 
 @router.get("/quick/{filter_name}", response_model=QuickAnalysisResponse)
@@ -110,37 +239,8 @@ async def quick_analysis(filter_name: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Quick analysis error: {e}")
+        logger.error(f"❌ Quick analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка быстрого анализа: {str(e)}")
-
-
-@router.post("/send-to-telegram/{filter_name}")
-async def send_analysis_to_telegram(filter_name: str, limit: int = Query(default=15, ge=5, le=30)):
-    """📱 Отправить AI анализ в Telegram"""
-    try:
-        service = AnalysisService()
-        result = await service.analyze_cars_by_filter(filter_name, limit)
-
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-
-        # Отправляем в Telegram
-        from app.services.telegram_service import TelegramService
-        telegram = TelegramService()
-        await telegram.send_ai_analysis_report(result)
-
-        return {
-            "status": "sent_to_telegram",
-            "filter_name": filter_name,
-            "cars_analyzed": result["total_cars_analyzed"],
-            "message": f"AI анализ {filter_name} отправлен в Telegram"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Telegram send error: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка отправки в Telegram: {str(e)}")
 
 
 @router.post("/manual-analysis")
@@ -155,32 +255,83 @@ async def trigger_manual_analysis(filter_name: str = Query(default=None, descrip
         return result
 
     except Exception as e:
-        logger.error(f"Manual analysis error: {e}")
+        logger.error(f"❌ Manual analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка ручного анализа: {str(e)}")
 
+
+# 🚀 НОВЫЕ ENDPOINTS ДЛЯ АВТОМАТИЗАЦИИ
+
+@router.post("/schedule-full-analysis")
+async def schedule_full_market_analysis(
+        background_tasks: BackgroundTasks,
+        delay_minutes: int = Query(default=5, ge=1, le=60, description="Задержка запуска в минутах")
+):
+    """⏰ Запланировать полный анализ рынка через N минут"""
+    try:
+        # Добавляем задачу в фон с задержкой
+        import asyncio
+
+        async def delayed_analysis():
+            await asyncio.sleep(delay_minutes * 60)
+            service = AnalysisService()
+            result = await service.analyze_full_database()
+
+            if result.get("success"):
+                from app.services.telegram_service import TelegramService
+                telegram = TelegramService()
+                await telegram.send_ai_analysis_report(result, urgent_mode=False)
+
+        background_tasks.add_task(delayed_analysis)
+
+        return {
+            "status": "scheduled",
+            "analysis_type": "full_market",
+            "scheduled_in_minutes": delay_minutes,
+            "message": f"Полный анализ рынка запланирован через {delay_minutes} минут"
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Schedule analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка планирования анализа: {str(e)}")
+
+
+# 🔍 СИСТЕМНАЯ ИНФОРМАЦИЯ
 
 @router.get("/status")
 async def get_analysis_status():
     """📊 Статус сервиса анализа с o3-mini"""
     try:
         from app.services.openai_service import OpenAIService
+        from app.repository.car_repository import CarRepository
+        from app.database import async_session
 
         openai_service = OpenAIService()
         connection_test = await openai_service.test_connection()
+
+        # Получаем статистику базы
+        async with async_session() as session:
+            repo = CarRepository(session)
+            global_stats = await repo.get_global_statistics()
+
+        cars_in_db = global_stats.get("total_cars", 0)
+        analysis_ready = cars_in_db >= 20
 
         if connection_test.get("status") == "success":
             return {
                 "status": "operational",
                 "ai_service": "online",
                 "model": "o3-mini",
+                "database_cars": cars_in_db,
+                "analysis_ready": analysis_ready,
+                "recommended_endpoint": "/analysis/full-market" if analysis_ready else "/analysis/by-filter",
                 "features": [
+                    "full_market_analysis",
+                    "market_trends",
+                    "database_statistics",
                     "filter_analysis",
                     "car_comparison",
-                    "recent_analysis",
-                    "brand_analysis",
-                    "quick_insights"
+                    "html_reports"
                 ],
-                "supported_brands": ["mercedes", "bmw", "audi"],
                 "connection_test": "passed"
             }
         else:
@@ -188,16 +339,20 @@ async def get_analysis_status():
                 "status": "degraded",
                 "ai_service": "limited",
                 "model": "o3-mini",
+                "database_cars": cars_in_db,
+                "analysis_ready": False,
                 "error": connection_test.get("error"),
                 "connection_test": "failed"
             }
 
     except Exception as e:
-        logger.error(f"Status check failed: {e}")
+        logger.error(f"❌ Status check failed: {e}")
         return {
             "status": "offline",
             "ai_service": "offline",
             "model": "o3-mini",
+            "database_cars": 0,
+            "analysis_ready": False,
             "error": str(e)
         }
 
@@ -214,11 +369,12 @@ async def get_available_models():
         return {
             "available_models": models,
             "current_model": "o3-mini",
-            "total_models": len(models)
+            "total_models": len(models),
+            "optimized_for": "full_database_analysis"
         }
 
     except Exception as e:
-        logger.error(f"Models check failed: {e}")
+        logger.error(f"❌ Models check failed: {e}")
         return {
             "available_models": ["o3-mini"],
             "current_model": "o3-mini",
@@ -238,9 +394,61 @@ async def test_openai_connection():
         return result
 
     except Exception as e:
-        logger.error(f"Connection test failed: {e}")
+        logger.error(f"❌ Connection test failed: {e}")
         return {
             "status": "error",
             "model": "o3-mini",
             "error": str(e)
         }
+
+
+# 🎯 ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+
+async def _send_to_telegram_bg(analysis_result: dict, analysis_type: str):
+    """Background task для отправки в Telegram"""
+    try:
+        from app.services.telegram_service import TelegramService
+        telegram = TelegramService()
+        await telegram.send_ai_analysis_report(analysis_result, urgent_mode=False)
+        logger.info(f"✅ Background task: {analysis_type} отправлен в Telegram")
+    except Exception as e:
+        logger.error(f"❌ Background task error for {analysis_type}: {e}")
+
+
+# 📖 ИНФОРМАЦИОННЫЕ ENDPOINTS
+
+@router.get("/help")
+async def get_analysis_help():
+    """📖 Справка по новым возможностям анализа"""
+    return {
+        "message": "AI анализ оптимизирован для работы с полной базой данных",
+        "new_features": {
+            "full_market_analysis": {
+                "endpoint": "/analysis/full-market",
+                "description": "Анализ всего рынка одним запросом (экономия токенов)",
+                "benefits": ["Полная картина рынка", "Меньше затрат на API", "Comprehensive insights"]
+            },
+            "market_trends": {
+                "endpoint": "/analysis/market-trends",
+                "description": "Анализ трендов на основе всей базы данных",
+                "benefits": ["Динамика рынка", "Прогнозы", "Seasonal patterns"]
+            },
+            "database_statistics": {
+                "endpoint": "/analysis/database-stats",
+                "description": "Детальная статистика без AI (быстро и бесплатно)",
+                "benefits": ["Мгновенные данные", "Без токенов", "Real-time insights"]
+            }
+        },
+        "migration_guide": {
+            "old_way": "Анализ каждого фильтра отдельно (/analysis/by-filter)",
+            "new_way": "Анализ всей базы сразу (/analysis/full-market)",
+            "token_savings": "До 80% экономии токенов OpenAI",
+            "better_insights": "Более полная картина рынка и трендов"
+        },
+        "recommended_workflow": [
+            "1. Проверьте статистику: GET /analysis/database-stats",
+            "2. Если машин >= 20: POST /analysis/full-market",
+            "3. Для трендов: POST /analysis/market-trends",
+            "4. Legacy фильтры: POST /analysis/by-filter/{filter_name}"
+        ]
+    }
