@@ -23,7 +23,7 @@ class HTMLReportService:
         html_content = self._build_html_content(analysis_result)
 
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(html_content)
 
             logger.info(f"✅ HTML отчет создан: {file_path}")
@@ -361,8 +361,14 @@ class HTMLReportService:
 </html>
 """
 
-    def _format_section(self, title: str, content: str, css_class: str, cars_data: List[Dict] = None,
-                        recommended_ids: List[int] = None) -> str:
+    def _format_section(
+        self,
+        title: str,
+        content: str,
+        css_class: str,
+        cars_data: List[Dict] = None,
+        recommended_ids: List[int] = None,
+    ) -> str:
         """Форматирует секцию отчета с автоматическими ссылками для рекомендаций"""
 
         if not content:
@@ -370,7 +376,9 @@ class HTMLReportService:
 
         # Если это секция с рекомендациями, добавляем ссылки
         if "рекомендаци" in title.lower() and cars_data and recommended_ids:
-            content = self._add_links_to_recommendations(content, cars_data, recommended_ids)
+            content = self._add_links_to_recommendations(
+                content, cars_data, recommended_ids
+            )
 
         return f"""
         <div class="section">
@@ -381,65 +389,61 @@ class HTMLReportService:
         </div>
         """
 
-    def _add_links_to_recommendations(self, content: str, cars_data: List[Dict], recommended_ids: List[int]) -> str:
+    def _add_links_to_recommendations(
+        self, content: str, cars_data: List[Dict], recommended_ids: List[int]
+    ) -> str:
         """Добавляет ссылки в текст рекомендаций для удобного перехода к объявлениям"""
 
         # Создаем мапу ID -> ссылка для быстрого поиска
         id_to_link = {car["id"]: car["link"] for car in cars_data}
         id_to_title = {car["id"]: car["title"] for car in cars_data}
 
-        # Паттерны для поиска упоминаний ID в тексте
-        patterns = [
-            r'(① ID #?(\d+))',  # ① ID #10
-            r'(② ID #?(\d+))',  # ② ID #13
-            r'(③ ID #?(\d+))',  # ③ ID #14
-            r'(④ ID #?(\d+))',
-            r'(⑤ ID #?(\d+))',
-            r'(⑥ ID #?(\d+))',
-            r'(⑦ ID #?(\d+))',
-            r'(⑧ ID #?(\d+))',
-            r'(⑨ ID #?(\d+))',
-            r'(⑩ ID #?(\d+))',
-            r'(ID #?(\d+)(?!\d))',  # ID #10 (не внутри других чисел)
-            r'(машин[уыа] #?(\d+))',  # машину #10
-            r'(автомобил[ьяю] #?(\d+))',  # автомобиль #10
-        ]
+        # Паттерн для поиска упоминаний ID в разных форматах
+        pattern = re.compile(
+            r"(?:①\s*ID\s*#?(\d+)|②\s*ID\s*#?(\d+)|③\s*ID\s*#?(\d+)|④\s*ID\s*#?(\d+)|"
+            r"⑤\s*ID\s*#?(\d+)|⑥\s*ID\s*#?(\d+)|⑦\s*ID\s*#?(\d+)|⑧\s*ID\s*#?(\d+)|"
+            r"⑨\s*ID\s*#?(\d+)|⑩\s*ID\s*#?(\d+)|ID\s*#?(\d+)(?!\d)|"
+            r"машин[уыа]\s*#?(\d+)|автомобил[ьяю]\s*#?(\d+))",
+            flags=re.IGNORECASE,
+        )
 
-        updated_content = content
+        def replace_with_link(match: re.Match) -> str:
+            full_match = match.group(0)
+            # Находим первую непустую группу с цифрой
+            car_id_str = next((g for g in match.groups() if g), None)
+            if not car_id_str:
+                return full_match
 
-        for pattern in patterns:
-            def replace_with_link(match):
-                full_match = match.group(1)
-                car_id_str = match.group(2)
+            try:
+                car_id = int(car_id_str)
+                if car_id in recommended_ids and car_id in id_to_link:
+                    link = id_to_link[car_id]
+                    title = (
+                        id_to_title[car_id][:50] + "..."
+                        if len(id_to_title[car_id]) > 50
+                        else id_to_title[car_id]
+                    )
+                    return (
+                        f'<a href="{link}" target="_blank" rel="noopener noreferrer" '
+                        f'class="recommendation-link" title="{title}">{full_match} 🔗</a>'
+                    )
+                return full_match
+            except ValueError:
+                return full_match
 
-                try:
-                    car_id = int(car_id_str)
+        return pattern.sub(replace_with_link, content)
 
-                    # Проверяем что это ID из наших рекомендованных машин
-                    if car_id in recommended_ids and car_id in id_to_link:
-                        link = id_to_link[car_id]
-                        title = id_to_title[car_id][:50] + "..." if len(id_to_title[car_id]) > 50 else id_to_title[
-                            car_id]
-
-                        # Создаем красивую ссылку с иконкой
-                        return f'<a href="{link}" target="_blank" class="recommendation-link" title="{title}">{full_match} 🔗</a>'
-                    else:
-                        return full_match
-
-                except ValueError:
-                    return full_match
-
-            updated_content = re.sub(pattern, replace_with_link, updated_content, flags=re.IGNORECASE)
-
-        return updated_content
-
-    def _create_top_cars_summary(self, cars_data: List[Dict], recommended_ids: List[int]) -> str:
+    def _create_top_cars_summary(
+        self, cars_data: List[Dict], recommended_ids: List[int]
+    ) -> str:
         """Создает краткую сводку по рекомендованным машинам с прямыми ссылками"""
 
         if not recommended_ids or not cars_data:
             return ""
 
-        recommended_cars = [car for car in cars_data if car.get("id") in recommended_ids]
+        recommended_cars = [
+            car for car in cars_data if car.get("id") in recommended_ids
+        ]
 
         if not recommended_cars:
             return ""
@@ -447,19 +451,23 @@ class HTMLReportService:
         summary_items = []
         for i, car in enumerate(recommended_cars[:10], 1):  # Топ-10
             car_id = car.get("id")
-            title = car.get("title", "")[:60] + ("..." if len(car.get("title", "")) > 60 else "")
+            title = car.get("title", "")[:60] + (
+                "..." if len(car.get("title", "")) > 60 else ""
+            )
             brand = car.get("brand", "")
             year = car.get("year", "")
             price = car.get("price", "")
             link = car.get("link", "")
 
-            summary_items.append(f"""
+            summary_items.append(
+                f"""
                 <div class="top-car-item">
                     <strong>{i}. {brand} {year}</strong> - 
-                    <a href="{link}" target="_blank" class="top-car-link">ID {car_id}: {title}</a><br>
+                    <a href="{link}" target="_blank" rel="noopener noreferrer" class="top-car-link">ID {car_id}: {title}</a><br>
                     <small>💰 {price}</small>
                 </div>
-            """)
+            """
+            )
 
         return f"""
         <div class="top-cars-summary">
@@ -518,7 +526,9 @@ class HTMLReportService:
         else:
             return analysis_type
 
-    def _generate_cars_table_rows(self, cars_data: List[Dict], recommended_ids: List[int]) -> str:
+    def _generate_cars_table_rows(
+        self, cars_data: List[Dict], recommended_ids: List[int]
+    ) -> str:
         """Генерирует строки таблицы с машинами (включая описания)"""
 
         if not cars_data:
@@ -530,12 +540,16 @@ class HTMLReportService:
             is_recommended = car_id in recommended_ids
             row_class = "recommended-car" if is_recommended else ""
 
-            title = car.get("title", "N/A")[:40] + ("..." if len(car.get("title", "")) > 40 else "")
+            title = car.get("title", "N/A")[:40] + (
+                "..." if len(car.get("title", "")) > 40 else ""
+            )
 
             # Обрабатываем описание для таблицы
             description = car.get("description", "")
             if description:
-                desc_short = description[:120] + ("..." if len(description) > 120 else "")
+                desc_short = description[:120] + (
+                    "..." if len(description) > 120 else ""
+                )
             else:
                 desc_short = "нет описания"
 
@@ -556,8 +570,12 @@ class HTMLReportService:
 
         return "".join(rows)
 
-    def _format_full_analysis_section(self, full_analysis: str, cars_data: List[Dict] = None,
-                                      recommended_ids: List[int] = None) -> str:
+    def _format_full_analysis_section(
+        self,
+        full_analysis: str,
+        cars_data: List[Dict] = None,
+        recommended_ids: List[int] = None,
+    ) -> str:
         """Форматирует секцию с полным анализом, добавляя ссылки"""
 
         if not full_analysis:
@@ -565,7 +583,9 @@ class HTMLReportService:
 
         # Добавляем ссылки в полный анализ тоже
         if cars_data and recommended_ids:
-            full_analysis = self._add_links_to_recommendations(full_analysis, cars_data, recommended_ids)
+            full_analysis = self._add_links_to_recommendations(
+                full_analysis, cars_data, recommended_ids
+            )
 
         return f"""
         <div class="section">
@@ -582,15 +602,22 @@ class HTMLReportService:
         try:
             reports = []
 
-            for file_path in sorted(self.reports_dir.glob("*.html"),
-                                    key=lambda x: x.stat().st_mtime, reverse=True)[:limit]:
+            for file_path in sorted(
+                self.reports_dir.glob("*.html"),
+                key=lambda x: x.stat().st_mtime,
+                reverse=True,
+            )[:limit]:
                 stat = file_path.stat()
-                reports.append({
-                    "filename": file_path.name,
-                    "size_mb": round(stat.st_size / 1024 / 1024, 2),
-                    "created": datetime.fromtimestamp(stat.st_mtime).strftime("%d.%m.%Y %H:%M"),
-                    "path": str(file_path)
-                })
+                reports.append(
+                    {
+                        "filename": file_path.name,
+                        "size_mb": round(stat.st_size / 1024 / 1024, 2),
+                        "created": datetime.fromtimestamp(stat.st_mtime).strftime(
+                            "%d.%m.%Y %H:%M"
+                        ),
+                        "path": str(file_path),
+                    }
+                )
 
             return reports
 
@@ -610,7 +637,9 @@ class HTMLReportService:
                     file_path.unlink()
                     deleted_count += 1
 
-            logger.info(f"Удалено {deleted_count} старых отчетов (старше {keep_days} дней)")
+            logger.info(
+                f"Удалено {deleted_count} старых отчетов (старше {keep_days} дней)"
+            )
             return deleted_count
 
         except Exception as e:
