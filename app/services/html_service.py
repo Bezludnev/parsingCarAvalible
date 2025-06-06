@@ -1,9 +1,10 @@
-# app/services/html_service.py - ОБНОВЛЕННАЯ с поддержкой описаний
+# app/services/html_service.py - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
 import os
 from datetime import datetime
 from typing import Dict, Any, List
 from pathlib import Path
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class HTMLReportService:
             return f"ai_analysis_{analysis_type}_{total_cars}cars_{timestamp}"
 
     def _build_html_content(self, analysis_result: Dict[str, Any]) -> str:
-        """Строит HTML контент отчета"""
+        """Строит HTML контент отчета с улучшенными ссылками"""
 
         # Извлекаем данные
         total_cars = analysis_result.get("total_cars_analyzed", 0)
@@ -93,6 +94,9 @@ class HTMLReportService:
 
         # Определяем заголовок
         title = self._get_analysis_title(analysis_result)
+
+        # Создаем список топ машин для быстрого доступа
+        top_cars_summary = self._create_top_cars_summary(cars_data, recommended_ids)
 
         return f"""
 <!DOCTYPE html>
@@ -173,6 +177,13 @@ class HTMLReportService:
             border-radius: 8px;
             border-left: 5px solid #dc3545;
         }}
+        .top-cars-summary {{
+            background: #e7f3ff;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 5px solid #007bff;
+            margin-bottom: 30px;
+        }}
         .cars-table {{
             width: 100%;
             border-collapse: collapse;
@@ -202,6 +213,35 @@ class HTMLReportService:
             text-decoration: none;
         }}
         .car-link:hover {{
+            text-decoration: underline;
+        }}
+        /* НОВЫЕ СТИЛИ для ссылок в рекомендациях */
+        .recommendation-link {{
+            color: #007bff;
+            text-decoration: none;
+            font-weight: bold;
+            padding: 2px 4px;
+            border-radius: 3px;
+            background-color: rgba(0, 123, 255, 0.1);
+            border: 1px solid rgba(0, 123, 255, 0.3);
+        }}
+        .recommendation-link:hover {{
+            background-color: rgba(0, 123, 255, 0.2);
+            text-decoration: none;
+        }}
+        .top-car-item {{
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 3px solid #28a745;
+        }}
+        .top-car-link {{
+            color: #28a745;
+            text-decoration: none;
+            font-weight: bold;
+        }}
+        .top-car-link:hover {{
             text-decoration: underline;
         }}
         .description-cell {{
@@ -250,7 +290,7 @@ class HTMLReportService:
     <div class="container">
         <div class="header">
             <h1>🤖 {title}</h1>
-            <p>Полный AI анализ автомобилей с описаниями • {datetime.now().strftime("%d.%m.%Y %H:%M")}</p>
+            <p>Экспертный AI анализ с поиском лучших сделок • {datetime.now().strftime("%d.%m.%Y %H:%M")}</p>
         </div>
 
         <div class="meta-info">
@@ -272,13 +312,15 @@ class HTMLReportService:
             </div>
         </div>
 
-        {self._format_section("📊 ОБЗОР РЫНКА", market_overview, "market-overview") if market_overview else ""}
+        {top_cars_summary}
 
-        {self._format_section("🏆 ТОП РЕКОМЕНДАЦИИ", top_recommendations, "recommendations") if top_recommendations else ""}
+        {self._format_section("📊 ОБЗОР РЫНКА", market_overview, "market-overview", cars_data, recommended_ids) if market_overview else ""}
 
-        {self._format_section("📝 ДЕТАЛЬНЫЙ АНАЛИЗ", detailed_analysis, "detailed-analysis") if detailed_analysis else ""}
+        {self._format_section("🏆 ТОП РЕКОМЕНДАЦИИ", top_recommendations, "recommendations", cars_data, recommended_ids) if top_recommendations else ""}
 
-        {self._format_section("📊 ОБЩИЕ ВЫВОДЫ", general_conclusions, "conclusions") if general_conclusions else ""}
+        {self._format_section("📝 ДЕТАЛЬНЫЙ АНАЛИЗ", detailed_analysis, "detailed-analysis", cars_data, recommended_ids) if detailed_analysis else ""}
+
+        {self._format_section("📊 ОБЩИЕ ВЫВОДЫ", general_conclusions, "conclusions", cars_data, recommended_ids) if general_conclusions else ""}
 
         <div class="section">
             <h2>📋 Список проанализированных автомобилей</h2>
@@ -304,20 +346,128 @@ class HTMLReportService:
             </div>
         </div>
 
-        {self._format_full_analysis_section(full_analysis) if full_analysis else ""}
+        {self._format_full_analysis_section(full_analysis, cars_data, recommended_ids) if full_analysis else ""}
 
         <div class="footer">
             <p>
                 <strong>Отчет создан:</strong> {datetime.now().strftime("%d %B %Y в %H:%M")} |
-                <strong>Система:</strong> Car Monitor Bot v2.1 |
-                <strong>AI:</strong> {model_used} |
-                <strong>📝 Описания:</strong> включены в анализ
+                <strong>Система:</strong> Car Monitor Bot v2.2 с экспертным анализом |
+                <strong>AI:</strong> {model_used} с улучшенными компетенциями |
+                <strong>📝 Описания:</strong> детально проанализированы
             </p>
         </div>
     </div>
 </body>
 </html>
 """
+
+    def _format_section(self, title: str, content: str, css_class: str, cars_data: List[Dict] = None,
+                        recommended_ids: List[int] = None) -> str:
+        """Форматирует секцию отчета с автоматическими ссылками для рекомендаций"""
+
+        if not content:
+            return ""
+
+        # Если это секция с рекомендациями, добавляем ссылки
+        if "рекомендаци" in title.lower() and cars_data and recommended_ids:
+            content = self._add_links_to_recommendations(content, cars_data, recommended_ids)
+
+        return f"""
+        <div class="section">
+            <h2>{title}</h2>
+            <div class="{css_class}">
+                <div class="analysis-text">{content}</div>
+            </div>
+        </div>
+        """
+
+    def _add_links_to_recommendations(self, content: str, cars_data: List[Dict], recommended_ids: List[int]) -> str:
+        """Добавляет ссылки в текст рекомендаций для удобного перехода к объявлениям"""
+
+        # Создаем мапу ID -> ссылка для быстрого поиска
+        id_to_link = {car["id"]: car["link"] for car in cars_data}
+        id_to_title = {car["id"]: car["title"] for car in cars_data}
+
+        # Паттерны для поиска упоминаний ID в тексте
+        patterns = [
+            r'(① ID #?(\d+))',  # ① ID #10
+            r'(② ID #?(\d+))',  # ② ID #13
+            r'(③ ID #?(\d+))',  # ③ ID #14
+            r'(④ ID #?(\d+))',
+            r'(⑤ ID #?(\d+))',
+            r'(⑥ ID #?(\d+))',
+            r'(⑦ ID #?(\d+))',
+            r'(⑧ ID #?(\d+))',
+            r'(⑨ ID #?(\d+))',
+            r'(⑩ ID #?(\d+))',
+            r'(ID #?(\d+)(?!\d))',  # ID #10 (не внутри других чисел)
+            r'(машин[уыа] #?(\d+))',  # машину #10
+            r'(автомобил[ьяю] #?(\d+))',  # автомобиль #10
+        ]
+
+        updated_content = content
+
+        for pattern in patterns:
+            def replace_with_link(match):
+                full_match = match.group(1)
+                car_id_str = match.group(2)
+
+                try:
+                    car_id = int(car_id_str)
+
+                    # Проверяем что это ID из наших рекомендованных машин
+                    if car_id in recommended_ids and car_id in id_to_link:
+                        link = id_to_link[car_id]
+                        title = id_to_title[car_id][:50] + "..." if len(id_to_title[car_id]) > 50 else id_to_title[
+                            car_id]
+
+                        # Создаем красивую ссылку с иконкой
+                        return f'<a href="{link}" target="_blank" class="recommendation-link" title="{title}">{full_match} 🔗</a>'
+                    else:
+                        return full_match
+
+                except ValueError:
+                    return full_match
+
+            updated_content = re.sub(pattern, replace_with_link, updated_content, flags=re.IGNORECASE)
+
+        return updated_content
+
+    def _create_top_cars_summary(self, cars_data: List[Dict], recommended_ids: List[int]) -> str:
+        """Создает краткую сводку по рекомендованным машинам с прямыми ссылками"""
+
+        if not recommended_ids or not cars_data:
+            return ""
+
+        recommended_cars = [car for car in cars_data if car.get("id") in recommended_ids]
+
+        if not recommended_cars:
+            return ""
+
+        summary_items = []
+        for i, car in enumerate(recommended_cars[:10], 1):  # Топ-10
+            car_id = car.get("id")
+            title = car.get("title", "")[:60] + ("..." if len(car.get("title", "")) > 60 else "")
+            brand = car.get("brand", "")
+            year = car.get("year", "")
+            price = car.get("price", "")
+            link = car.get("link", "")
+
+            summary_items.append(f"""
+                <div class="top-car-item">
+                    <strong>{i}. {brand} {year}</strong> - 
+                    <a href="{link}" target="_blank" class="top-car-link">ID {car_id}: {title}</a><br>
+                    <small>💰 {price}</small>
+                </div>
+            """)
+
+        return f"""
+        <div class="top-cars-summary">
+            <h2>🏆 ТОП РЕКОМЕНДОВАННЫХ МАШИН - БЫСТРЫЙ ДОСТУП</h2>
+            <p><strong>💡 Кликай на ссылки для перехода к объявлениям:</strong></p>
+            {"".join(summary_items)}
+        </div>
+        """
 
     def _get_analysis_title(self, analysis_result: Dict[str, Any]) -> str:
         """Генерирует заголовок для отчета"""
@@ -368,21 +518,6 @@ class HTMLReportService:
         else:
             return analysis_type
 
-    def _format_section(self, title: str, content: str, css_class: str) -> str:
-        """Форматирует секцию отчета"""
-
-        if not content:
-            return ""
-
-        return f"""
-        <div class="section">
-            <h2>{title}</h2>
-            <div class="{css_class}">
-                <div class="analysis-text">{content}</div>
-            </div>
-        </div>
-        """
-
     def _generate_cars_table_rows(self, cars_data: List[Dict], recommended_ids: List[int]) -> str:
         """Генерирует строки таблицы с машинами (включая описания)"""
 
@@ -421,11 +556,16 @@ class HTMLReportService:
 
         return "".join(rows)
 
-    def _format_full_analysis_section(self, full_analysis: str) -> str:
-        """Форматирует секцию с полным анализом"""
+    def _format_full_analysis_section(self, full_analysis: str, cars_data: List[Dict] = None,
+                                      recommended_ids: List[int] = None) -> str:
+        """Форматирует секцию с полным анализом, добавляя ссылки"""
 
         if not full_analysis:
             return ""
+
+        # Добавляем ссылки в полный анализ тоже
+        if cars_data and recommended_ids:
+            full_analysis = self._add_links_to_recommendations(full_analysis, cars_data, recommended_ids)
 
         return f"""
         <div class="section">
