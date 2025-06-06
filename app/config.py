@@ -53,14 +53,14 @@ class Settings(BaseSettings):
             "urgent_mode": True
         },
 
-        # 💎 PREMIUM срочная продажа - дорогие машины со скидкой
-        "premium_urgent": {
-            "url": "https://www.bazaraki.com/car-motorbikes-boats-and-parts/cars-trucks-and-vans/?price_min=20000&price_max=20000",
-            "min_year": 2015,
-            "max_mileage": 200000,
-            "brand": "Premium",  # Все премиум марки
-            "urgent_mode": True
-        },
+        # # 💎 PREMIUM срочная продажа - дорогие машины со скидкой
+        # "premium_urgent": {
+        #     "url": "https://www.bazaraki.com/car-motorbikes-boats-and-parts/cars-trucks-and-vans/?price_min=20000&price_max=20000",
+        #     "min_year": 2015,
+        #     "max_mileage": 200000,
+        #     "brand": "Premium",  # Все премиум марки
+        #     "urgent_mode": True
+        # },
 
         # 🎯 BUDGET срочная продажа - дешевые варианты
         "budget_urgent": {
