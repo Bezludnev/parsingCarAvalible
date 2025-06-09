@@ -1,4 +1,4 @@
-# app/services/monitor_service.py - ОБНОВЛЕННАЯ с urgent поддержкой
+# app/services/monitor_service.py - ОПТИМИЗИРОВАННАЯ версия без автоматического AI
 from app.services.scraper_service import ScraperService
 from app.services.telegram_service import TelegramService
 from app.services.analysis_service import AnalysisService
@@ -21,7 +21,7 @@ class MonitorService:
         """Проверка текста на признаки срочной продажи через AI"""
         if not text:
             return False
-        # Сначала быстрый ключевой фильтр
+        # Быстрый ключевой фильтр
         keywords = [
             "срочно", "urgent", "быстро", "price drop", "недорого", "must sell"
         ]
@@ -29,7 +29,7 @@ class MonitorService:
         if any(k in text_lower for k in keywords):
             return True
 
-        # Если ключевых слов нет, используем AI определение
+        # AI анализ только для важных случаев
         try:
             return await self.analysis.openai_service.detect_urgent_sale(text)
         except Exception as e:
@@ -37,17 +37,23 @@ class MonitorService:
             return False
 
     async def _process_filter(self, filter_name: str, repo: CarRepository) -> int:
-        """Скрапинг и обработка одного фильтра"""
+        """Скрапинг и обработка одного фильтра с оптимизацией"""
         try:
             filter_config = settings.car_filters.get(filter_name, {})
             is_urgent_filter = filter_config.get("urgent_mode", False)
 
-            cars = await self.scraper.scrape_cars(filter_name)
+            # Получаем существующие ссылки для этого фильтра
+            existing_links = await repo.get_existing_links_by_filter(filter_name)
+            logger.info(f"📋 {filter_name}: {len(existing_links)} существующих ссылок в базе")
+
+            # Передаем existing_links в scraper для оптимизации
+            cars = await self.scraper.scrape_cars(filter_name, existing_links)
             logger.info(f"{'🔥' if is_urgent_filter else '📊'} "
-                        f"Найдено {len(cars)} объявлений для {filter_name}")
+                        f"Найдено {len(cars)} НОВЫХ объявлений для {filter_name}")
 
             new_cars_count = 0
             for car_data in cars:
+                # Дополнительная проверка на всякий случай
                 existing_car = await repo.get_by_link(car_data.link)
                 if not existing_car:
                     new_car = await repo.create(car_data)
@@ -56,7 +62,7 @@ class MonitorService:
                     # Проверяем urgent статус
                     urgent = await self._is_urgent(new_car.description or "")
 
-                    # Отправляем уведомление с учетом urgent режима
+                    # Отправляем уведомление
                     await self.telegram.send_new_car_notification(
                         new_car,
                         urgent=urgent or is_urgent_filter,
@@ -73,7 +79,7 @@ class MonitorService:
             return 0
 
     async def check_new_cars(self):
-        """Основная функция для проверки новых машин + AI анализ"""
+        """Основная функция для проверки новых машин БЕЗ автоматического AI анализа"""
         logger.info("🔍 Начинаем проверку новых объявлений...")
 
         new_cars_found = {}
@@ -113,61 +119,21 @@ class MonitorService:
                 count = await self._process_filter(filter_name, repo)
                 new_cars_found[filter_name] = count
 
-        # AI анализ если найдены новые машины
+        # Простая сводка без AI анализа
         total_new_cars = sum(new_cars_found.values())
 
         if total_new_cars > 0:
-            logger.info(f"🤖 Найдено {total_new_cars} новых машин, запускаем AI анализ...")
-            await self._run_ai_analysis_for_new_cars(new_cars_found, urgent_filters_stats)
+            logger.info(f"✅ Найдено {total_new_cars} новых машин")
+
+            # Краткая статистика в лог
+            for filter_name, count in new_cars_found.items():
+                if count > 0:
+                    urgent_mark = "🔥" if filter_name in urgent_filters_stats else "📊"
+                    logger.info(f"  {urgent_mark} {filter_name}: {count} машин")
         else:
             logger.info("😴 Новых машин не найдено")
 
-        logger.info("✅ Проверка завершена")
-
-    async def _run_ai_analysis_for_new_cars(self, new_cars_found: dict, urgent_stats: dict):
-        """Запускает AI анализ для фильтров с новыми машинами"""
-        analysis_summaries = []
-
-        for filter_name, new_count in new_cars_found.items():
-            if new_count > 0:
-                try:
-                    filter_config = settings.car_filters.get(filter_name, {})
-                    is_urgent_filter = filter_config.get("urgent_mode", False)
-
-                    logger.info(f"🔍 AI анализ для {filter_name} "
-                                f"({'URGENT' if is_urgent_filter else 'обычный'}) "
-                                f"- {new_count} новых машин")
-
-                    # Быстрый анализ
-                    quick_result = await self.analysis.get_quick_insight(filter_name)
-
-                    if quick_result.get("success"):
-                        # Отправляем с пометкой urgent если это urgent фильтр
-                        await self.telegram.send_quick_analysis_notification(
-                            quick_result,
-                            urgent_mode=is_urgent_filter
-                        )
-                        analysis_summaries.append(quick_result)
-
-                        # Полный анализ только если достаточно машин
-                        threshold = 2 if is_urgent_filter else 3
-
-                        if quick_result.get("total_cars", 0) >= threshold:
-                            full_result = await self.analysis.analyze_cars_by_filter(filter_name, 15)
-
-                            if full_result.get("success"):
-                                await self.telegram.send_ai_analysis_report(
-                                    full_result,
-                                    urgent_mode=is_urgent_filter
-                                )
-                                logger.info(f"✅ Полный AI анализ отправлен для {filter_name}")
-
-                except Exception as e:
-                    logger.error(f"❌ Ошибка AI анализа для {filter_name}: {e}")
-
-        # Общая сводка
-        if len(analysis_summaries) > 1:
-            await self.telegram.send_analysis_summary(analysis_summaries)
+        logger.info("✅ Проверка завершена (AI анализ отключен)")
 
     async def run_urgent_check_only(self):
         """🔥 Отдельная проверка только urgent фильтров"""
@@ -191,7 +157,7 @@ class MonitorService:
             logger.info(f"🔥 Найдено {total_urgent} urgent машин")
             await self.telegram.send_urgent_summary(urgent_found)
 
-            # AI анализ для urgent
+            # AI анализ для urgent (опционально)
             for filter_name, count in urgent_found.items():
                 if count > 0:
                     try:

@@ -1,9 +1,9 @@
-# app/repository/car_repository.py - ОБНОВЛЕННАЯ с методами для анализа всей базы
+# app/repository/car_repository.py - с методом для получения существующих ссылок
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func, text
 from app.models.car import Car
 from app.schemas.car import CarCreate
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 from datetime import datetime, timedelta
 
 
@@ -16,6 +16,22 @@ class CarRepository:
             select(Car).where(Car.link == link)
         )
         return result.scalar_one_or_none()
+
+    async def get_existing_links_by_filter(self, filter_name: str) -> Set[str]:
+        """🎯 НОВЫЙ: Получает все существующие ссылки для фильтра"""
+        result = await self.session.execute(
+            select(Car.link).where(Car.filter_name == filter_name)
+        )
+        links = result.scalars().all()
+        return set(links)
+
+    async def get_all_existing_links(self) -> Set[str]:
+        """Получает все существующие ссылки из базы"""
+        result = await self.session.execute(
+            select(Car.link)
+        )
+        links = result.scalars().all()
+        return set(links)
 
     async def create(self, car_data: CarCreate) -> Car:
         car = Car(**car_data.dict())
@@ -73,10 +89,10 @@ class CarRepository:
         )
         return result.scalars().all()
 
-    # 🎯 НОВЫЕ МЕТОДЫ ДЛЯ АНАЛИЗА ВСЕЙ БАЗЫ
+    # 🎯 МЕТОДЫ ДЛЯ АНАЛИЗА ВСЕЙ БАЗЫ
 
     async def get_all_cars_for_analysis(self, limit: int = 1000) -> List[Car]:
-        """🎯 Получает ВСЕ машины из базы для анализа (с разумным лимитом)"""
+        """🎯 Получает ВСЕ машины из базы для анализа"""
         result = await self.session.execute(
             select(Car)
             .order_by(Car.created_at.desc())
@@ -99,7 +115,7 @@ class CarRepository:
         )
         stats = result.first()
 
-        # Статистика по ценам (извлекаем числовые значения)
+        # Статистика по ценам
         price_stats = await self.session.execute(
             text("""
                 SELECT 
@@ -208,7 +224,7 @@ class CarRepository:
         result = await self.session.execute(
             select(Car.year, func.count(Car.id).label('count'))
             .where(Car.year.isnot(None))
-            .where(Car.year > 2000)  # Фильтруем слишком старые машины
+            .where(Car.year > 2000)
             .group_by(Car.year)
             .order_by(Car.year.desc())
         )
