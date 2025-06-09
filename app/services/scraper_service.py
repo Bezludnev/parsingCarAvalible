@@ -1,4 +1,4 @@
-# app/services/scraper_service.py - ОБНОВЛЕННАЯ с urgent поддержкой
+# app/services/scraper_service.py - ОПТИМИЗИРОВАННАЯ с проверкой существующих ссылок
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -8,7 +8,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import re
 import asyncio
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 from app.config import settings
 from app.schemas.car import CarCreate
 import httpx
@@ -60,12 +60,31 @@ class ScraperService:
         text_lower = text.lower()
         return any(keyword in text_lower for keyword in urgent_keywords)
 
-    def _parse_car_data(self, ad, filter_config: Dict) -> Optional[CarCreate]:
-        # Title и link
+    def _should_skip_ad(self, ad, existing_links: Set[str]) -> tuple[bool, str]:
+        """🎯 Проверяет, нужно ли пропустить объявление"""
         title_tag = ad.find("a", class_="advert__content-title")
         if not title_tag:
+            return True, "no_title_tag"
+
+        link = "https://www.bazaraki.com" + title_tag.get('href', '')
+
+        if link in existing_links:
+            return True, "already_exists"
+
+        return False, ""
+
+    def _parse_car_data(self, ad, filter_config: Dict, existing_links: Set[str]) -> Optional[CarCreate]:
+        """Парсит данные автомобиля с проверкой существования"""
+
+        # Сначала быстрая проверка - есть ли уже в базе
+        should_skip, reason = self._should_skip_ad(ad, existing_links)
+        if should_skip:
+            if reason == "already_exists":
+                logger.debug("⏭️ Пропускаем существующее объявление")
             return None
 
+        # Title и link (уже проверили в _should_skip_ad)
+        title_tag = ad.find("a", class_="advert__content-title")
         title = title_tag.text.strip()
         link = "https://www.bazaraki.com" + title_tag.get('href', '')
 
@@ -123,7 +142,7 @@ class ScraperService:
             if place_tag:
                 place = place_tag.text.strip()
 
-        # Description
+        # Description (загружается отдельно - только для новых объявлений!)
         desc_tag = ad.find("div", class_="advert__description")
         if not desc_tag:
             desc_tag = ad.find("div", class_="advert__content-description")
@@ -140,12 +159,10 @@ class ScraperService:
 
             # Более мягкие ограничения для urgent
             if year and year < filter_config.get("min_year", 0):
-                # В urgent режиме позволяем машины на 2 года старше
                 if year < (filter_config.get("min_year", 0) - 2):
                     return None
 
             if mileage and mileage > filter_config.get("max_mileage", float('inf')):
-                # В urgent режиме позволяем +50k пробега если есть urgent keywords
                 max_allowed = filter_config.get("max_mileage", float('inf'))
                 if has_urgent_text:
                     max_allowed += 50000  # Бонус для urgent объявлений
@@ -176,13 +193,14 @@ class ScraperService:
             filter_name=filter_config.get("filter_name", "unknown")
         )
 
-    def _scrape_cars_sync(self, filter_config: Dict) -> List[CarCreate]:
-        """Synchronous scraping logic executed in a thread"""
+    def _scrape_cars_sync(self, filter_config: Dict, existing_links: Set[str]) -> List[CarCreate]:
+        """Synchronous scraping с оптимизацией по existing_links"""
         is_urgent = filter_config.get("urgent_mode", False)
         filter_name = filter_config.get("filter_name", "unknown")
 
-        logger.info(f"🌐 Начинаем скрапинг: {filter_name} "
+        logger.info(f"🌐 Начинаем оптимизированный скрапинг: {filter_name} "
                     f"{'(URGENT режим)' if is_urgent else '(обычный режим)'}")
+        logger.info(f"📋 Исключаем {len(existing_links)} существующих ссылок")
 
         driver = self._create_driver()
         try:
@@ -200,19 +218,29 @@ class ScraperService:
             logger.info(f"📄 Найдено {len(ads)} объявлений на странице для {filter_name}")
 
             cars = []
+            skipped_existing = 0
+
             for ad in ads:
-                car_data = self._parse_car_data(ad, filter_config)
+                car_data = self._parse_car_data(ad, filter_config, existing_links)
                 if car_data:
                     cars.append(car_data)
+                else:
+                    # Проверяем причину пропуска
+                    should_skip, reason = self._should_skip_ad(ad, existing_links)
+                    if reason == "already_exists":
+                        skipped_existing += 1
 
-            logger.info(f"✅ Отфильтровано: {len(cars)} машин для {filter_name}")
+            logger.info(f"✅ Отфильтровано: {len(cars)} НОВЫХ машин для {filter_name}")
+            logger.info(f"⏭️ Пропущено существующих: {skipped_existing}")
+            logger.info(f"📊 Соотношение: {len(cars)} новых / {skipped_existing} существующих")
+
             return cars
 
         finally:
             driver.quit()
 
-    async def scrape_cars(self, filter_name: str) -> List[CarCreate]:
-        """Public async method that offloads work to a thread"""
+    async def scrape_cars(self, filter_name: str, existing_links: Set[str] = None) -> List[CarCreate]:
+        """🎯 ОПТИМИЗИРОВАННЫЙ async метод с передачей existing_links"""
         filter_config = settings.car_filters.get(filter_name)
         if not filter_config:
             logger.warning(f"❌ Фильтр {filter_name} не найден в конфигурации")
@@ -220,9 +248,13 @@ class ScraperService:
 
         filter_config["filter_name"] = filter_name
 
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._scrape_cars_sync, filter_config)
+        # Если existing_links не передан, создаем пустой set
+        if existing_links is None:
+            existing_links = set()
+            logger.warning(f"⚠️ existing_links не передан для {filter_name}, парсим все объявления")
 
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._scrape_cars_sync, filter_config, existing_links)
 
     async def get_available_filters(self) -> Dict[str, Dict]:
         """Возвращает доступные фильтры с информацией о режиме"""
