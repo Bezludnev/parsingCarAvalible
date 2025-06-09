@@ -131,7 +131,7 @@ async def root():
             "deal_hunting"
         ],
         "schedule": {
-            "monitoring": "каждые 5-10 минут (пауза ночью)",
+            "monitoring": "каждые 30-40 минут (пауза ночью)",
             "ai_analysis": "09:00 и 18:00 (поиск лучших сделок)"
         }
     }

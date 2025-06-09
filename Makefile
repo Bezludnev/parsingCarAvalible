@@ -1,253 +1,132 @@
--include .env
-export
+# ────────────────────────────────────────────
+# 1) Кросс-платформенные переменные
+# ────────────────────────────────────────────
 
-# Project settings
+# В Windows переменная OS автоматически равна Windows_NT
+ifeq ($(OS),Windows_NT)
+  # Будем звать python (а не python3)
+  PYTHON := python
+
+  # ISO-время для BUILD_TIME
+  DATE_CMD       := powershell -NoProfile -Command "Get-Date -Format s"
+  # Формат для имени файла: 20250609_153012
+  DATE_FILE_CMD  := powershell -NoProfile -Command "Get-Date -Format 'yyyyMMdd_HHmmss'"
+  # Задержка в секундах
+  SLEEP_CMD      := powershell -NoProfile -Command "Start-Sleep -Seconds"
+else
+  PYTHON         := python3
+  DATE_CMD       := date -Iseconds
+  DATE_FILE_CMD  := date +%Y%m%d_%H%M%S
+  SLEEP_CMD      := sleep
+endif
+
+# BUILD_TIME будет вычисляться при первом обращении
+BUILD_TIME ?= $(shell $(DATE_CMD))
+
+# ────────────────────────────────────────────
+# 2) Ваши обычные переменные и цели
+# ────────────────────────────────────────────
+
 PROJECT_NAME ?= car-monitor
 SERVICE_NAME ?= app
 PYTHON_VERSION ?= 3.11
-BUILD_TIME ?= $(shell date -Iseconds)
 
 .DEFAULT_GOAL := help
+
 .PHONY: help
-help:
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-27s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+help: ## Показать список целей
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} \
+	   /^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-27s\033[0m %s\n", $$1, $$2 } \
+	   /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
 .PHONY: setup
-setup: ## Setup environment and install dependencies
-	@echo "🔧 Setting up development environment..."
-	@if [ ! -f .env ]; then cp .env.example .env; echo "📄 Created .env from example"; fi
-	@echo "✅ Setup complete! Edit .env with your tokens"
+setup: ## Настройка окружения
+	@echo "🔧 Setting up dev..."
+	@if [ ! -f .env ]; then cp .env.example .env; echo "📄 .env создан"; fi
 
 .PHONY: install
-install: ## Install Python dependencies locally
-	@echo "📦 Installing dependencies..."
+install: ## pip install
+	@echo "📦 Installing deps..."
 	pip install -r requirements.txt
 
 .PHONY: dev
-dev: ## Run FastAPI locally (without Docker)
-	@echo "🚀 Starting FastAPI development server..."
+dev: ## Запустить FastAPI локально
+	@echo "🚀 Starting uvicorn..."
 	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ##@ Docker Operations
 .PHONY: up
-up: ## Start all containers
+up: ## docker-compose up
 	@echo "🐳 Starting containers..."
 	docker-compose up -d
 
-.PHONY: start
-start: up ## Alias for up
-
 .PHONY: down
-down: ## Stop containers but keep volumes
+down: ## docker-compose down
 	@echo "⏹️  Stopping containers..."
 	docker-compose down --remove-orphans
 
-.PHONY: stop
-stop: down ## Alias for down
-
-.PHONY: restart
-restart: ## Quick restart (preserve volumes and cache)
-	@echo "🔄 Quick restart..."
-	docker-compose restart $(SERVICE_NAME)
-
 .PHONY: rebuild
-rebuild: ## Full rebuild and restart
-	@echo "🔨 Rebuilding containers..."
+rebuild: ## build + up
+	@echo "🔨 Rebuilding..."
 	docker-compose down --remove-orphans
 	docker-compose build --no-cache
 	docker-compose up -d
 
-.PHONY: watch
-watch: ## Live reload mode (rebuild on changes)
-	@echo "👀 Starting live reload mode..."
-	docker-compose down --remove-orphans
-	docker-compose up --build
-
-.PHONY: clear
-clear: ## Remove containers and volumes (DESTRUCTIVE)
-	@echo "🗑️  Removing containers and volumes..."
-	docker-compose down --remove-orphans --volumes
-	docker system prune -f
-
 ##@ Database
-.PHONY: db-shell
-db-shell: ## Connect to MySQL shell
-	docker-compose exec mysql mysql -u caruser -pcarpass car_monitor
-
 .PHONY: db-reset
-db-reset: ## Reset database (DESTRUCTIVE)
-	@echo "💀 Resetting database..."
+db-reset: ## Сброс БД (DESTRUCTIVE)
+	@echo "💀 Resetting DB..."
 	docker-compose down
-	docker volume rm $(shell docker-compose config --volumes | grep mysql) 2>/dev/null || true
+ifeq ($(OS),Windows_NT)
+	@echo "⚠️  Windows: пропускаем автоматический rm volume"
+else
+	-docker volume rm $(shell docker-compose config --volumes | grep mysql) 2>/dev/null
+endif
 	docker-compose up -d mysql
 	@echo "⏳ Waiting for MySQL..."
-	sleep 10
+	$(SLEEP_CMD) 10
 	docker-compose up -d $(SERVICE_NAME)
 
 .PHONY: migrate
-migrate: ## Apply Alembic migrations
-	@echo "📈 Updating database migrations..."
+migrate: ## alembic upgrade
+	@echo "📈 Migrations..."
 	docker-compose exec $(SERVICE_NAME) alembic upgrade head
 
-##@ Monitoring & Logs
+##@ Logs & Monitoring
 .PHONY: logs
-logs: ## Show all logs
+logs: ## Все логи
 	docker-compose logs -f
 
 .PHONY: logs-app
-logs-app: ## Show app logs only
+logs-app: ## Только логи приложения
 	docker-compose logs -f $(SERVICE_NAME)
 
-.PHONY: logs-mysql
-logs-mysql: ## Show MySQL logs
-	docker-compose logs -f mysql
+##@ Misc
+.PHONY: status
+status: ## контейнеры + health
+	@make ps
+	@make check-health
 
 .PHONY: ps
-ps: ## Show running containers
+ps: ## показать контейнеры
 	docker-compose ps
 
-.PHONY: stats
-stats: ## Show container stats
-	docker stats $(shell docker-compose ps -q)
-
-##@ Testing & Quality
-.PHONY: shell
-shell: ## Enter app container shell
-	docker-compose exec $(SERVICE_NAME) /bin/bash
-
-.PHONY: test
-test: ## Run tests (if any)
-	@echo "🧪 Running tests..."
-	docker-compose exec $(SERVICE_NAME) python -m pytest tests/ -v || echo "No tests found"
-
-.PHONY: format
-format: ## Format Python code
-	@echo "🎨 Formatting code..."
-	docker-compose exec $(SERVICE_NAME) python -m black app/ --line-length 100 || echo "Install black for formatting"
-
-.PHONY: lint
-lint: ## Lint Python code
-	@echo "🔍 Linting code..."
-	docker-compose exec $(SERVICE_NAME) python -m flake8 app/ || echo "Install flake8 for linting"
-
-##@ API Testing
 .PHONY: check-health
-check-health: ## Check API health
-	@echo "🏥 Checking API health..."
-	curl -s http://localhost:8000/health | python3 -m json.tool || echo "API not responding"
+check-health: ## проверка /health
+	@echo "🏥 Health check..."
+	curl -s http://localhost:8000/health | $(PYTHON) -m json.tool || echo "API не отвечает"
 
-.PHONY: trigger-scraping
-trigger-scraping: ## Manual trigger car scraping
-	@echo "🔍 Triggering manual scraping..."
-	curl -X POST http://localhost:8000/cars/check-now | python3 -m json.tool
-
-##@ AI Analysis (NEW)
-.PHONY: scheduled-analysis
-scheduled-analysis: ## Run scheduled AI analysis
-	@echo "🤖 Running scheduled AI analysis..."
-	curl -X POST http://localhost:8000/analysis/scheduled-analysis | python3 -m json.tool
-
-.PHONY: check-scheduler
-check-scheduler: ## Check scheduler status
-	@echo "⏰ Checking scheduler status..."
-	curl -s http://localhost:8000/analysis/scheduler-status | python3 -m json.tool
-
-.PHONY: full-market-analysis
-full-market-analysis: ## Run full market analysis
-	@echo "📊 Running full market analysis..."
-	curl -X POST http://localhost:8000/analysis/full-market | python3 -m json.tool
-
-.PHONY: database-stats
-database-stats: ## Get database statistics
-	@echo "📊 Getting database statistics..."
-	curl -s http://localhost:8000/analysis/database-stats | python3 -m json.tool
-
-.PHONY: market-trends
-market-trends: ## Analyze market trends
-	@echo "📈 Analyzing market trends..."
-	curl -X POST "http://localhost:8000/analysis/market-trends?days=14" | python3 -m json.tool
-
-.PHONY: ai-status
-ai-status: ## Check AI service status
-	@echo "🤖 Checking AI service status..."
-	curl -s http://localhost:8000/analysis/status | python3 -m json.tool
-
-##@ Reports Management
-.PHONY: list-reports
-list-reports: ## List HTML reports
-	@echo "📋 Listing HTML reports..."
-	curl -s http://localhost:8000/reports/list | python3 -m json.tool
-
-.PHONY: reports-stats
-reports-stats: ## Get reports statistics
-	@echo "📊 Getting reports statistics..."
-	curl -s http://localhost:8000/reports/stats | python -m json.tool
-
-.PHONY: cleanup-reports
-cleanup-reports: ## Clean old reports (7 days)
-	@echo "🗑️ Cleaning old reports..."
-	curl -X DELETE "http://localhost:8000/reports/cleanup?keep_days=7" | python -m json.tool
-
-##@ Advanced
+##@ Backup
 .PHONY: backup-db
-backup-db: ## Backup database
-	@echo "💾 Creating database backup..."
-	docker-compose exec mysql mysqldump -u caruser -pcarpass car_monitor > backup_$(shell date +%Y%m%d_%H%M%S).sql
-	@echo "✅ Backup saved"
+backup-db: ## Бекап БД в SQL файл
+	@echo "💾 Backing up DB..."
+	docker-compose exec mysql mysqldump -u caruser -pcarpass car_monitor \
+	  > backup_$(shell $(DATE_FILE_CMD)).sql
+	@echo "✅ Saved as backup_*.sql"
 
-.PHONY: clean-images
-clean-images: ## Clean unused Docker images
-	@echo "🧹 Cleaning Docker images..."
-	docker image prune -f
-
-.PHONY: update-chrome
-update-chrome: ## Force Chrome/ChromeDriver update
-	@echo "🌐 Updating Chrome and ChromeDriver..."
-	docker-compose build --no-cache $(SERVICE_NAME)
-
-##@ Quick Commands
-.PHONY: fresh
-fresh: clear rebuild ## Complete fresh start (DESTRUCTIVE)
-
-.PHONY: quick
-quick: restart logs-app ## Quick restart and show logs
-
-.PHONY: status
-status: ps check-health ai-status ## Show status and health
-
-##@ Development Workflow
-.PHONY: code-reload
-code-reload: ## Reload code without full restart (fastest)
-	@echo "⚡ Hot reloading code..."
-	docker-compose exec $(SERVICE_NAME) pkill -HUP -f uvicorn || echo "Restarting container..."
-	docker-compose restart $(SERVICE_NAME)
-
-.PHONY: dev-cycle
-dev-cycle: code-reload logs-app ## Development cycle: reload + logs
-
-##@ Scheduled Analysis Workflow
-.PHONY: test-ai-pipeline
-test-ai-pipeline: ## Test complete AI analysis pipeline
-	@echo "🧪 Testing AI analysis pipeline..."
-	@echo "1. Database stats..."
-	@make database-stats
-	@echo "\n2. Scheduled analysis..."
-	@make scheduled-analysis
-	@echo "\n3. Scheduler status..."
-	@make check-scheduler
-
-.PHONY: morning-routine
-morning-routine: ## Morning dev routine: status + AI analysis
-	@echo "🌅 Morning development routine..."
-	@make status
-	@make database-stats
-	@make scheduled-analysis
-
-.PHONY: deploy-check
-deploy-check: ## Pre-deployment checks
-	@echo "🚀 Pre-deployment checks..."
-	@make check-health
-	@make ai-status
-	@make check-scheduler
-	@make database-stats
+##@ Sleep-helper (пример)
+.PHONY: wait
+wait: ## Демка SLEEP
+	@echo "⏳ Ждем 5 сек..."
+	$(SLEEP_CMD) 5 && echo "Поехали!" 
