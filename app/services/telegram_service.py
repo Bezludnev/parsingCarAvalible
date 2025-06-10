@@ -6,7 +6,7 @@ from aiogram.types import FSInputFile
 from app.config import settings
 from app.models.car import Car
 from app.services.html_service import HTMLReportService
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
 import os
@@ -537,3 +537,244 @@ class TelegramService:
                 logger.info("✅ Telegram bot session закрыта")
         except Exception as e:
             logger.error(f"❌ Ошибка закрытия Telegram session: {e}")
+
+    # 🆕 МЕТОДЫ ДЛЯ УВЕДОМЛЕНИЙ ОБ ИЗМЕНЕНИЯХ
+
+        async def send_car_changes_notification(self, car, changes: Dict[str, Any]):
+            """🔄 Отправляет уведомление об изменениях в объявлении"""
+            logger.info(f"📱 send_car_changes_notification() called for car {car.id}")
+
+            try:
+                price_changed = changes.get("price_changed", False)
+                description_changed = changes.get("description_changed", False)
+
+                logger.info(
+                    f"📊 Changes summary for car {car.id}: price={price_changed}, description={description_changed}")
+
+                # Определяем тип изменения для заголовка
+                if price_changed and description_changed:
+                    header = "🔄💰📝 <b>ИЗМЕНЕНИЯ В ОБЪЯВЛЕНИИ</b>"
+                elif price_changed:
+                    header = "🔄💰 <b>ИЗМЕНЕНИЕ ЦЕНЫ</b>"
+                elif description_changed:
+                    header = "🔄📝 <b>ИЗМЕНЕНИЕ ОПИСАНИЯ</b>"
+                else:
+                    logger.warning(f"⚠️ No changes detected for car {car.id} - skipping notification")
+                    return  # Нет изменений
+
+                message = f"""{header}
+
+    🚗 <b>Автомобиль:</b> {car.brand} {car.year or ''}
+    📝 <b>Название:</b> {car.title[:60]}{'...' if len(car.title) > 60 else ''}
+    🆔 <b>ID:</b> {car.id}
+
+    """
+
+                # Добавляем информацию об изменении цены
+                if price_changed:
+                    old_price = changes.get("old_price", "неизвестно")
+                    new_price = changes.get("new_price", "неизвестно")
+
+                    logger.info(f"💰 Price change details for car {car.id}: '{old_price}' → '{new_price}'")
+
+                    # Определяем направление изменения цены
+                    price_direction = self._analyze_price_change(old_price, new_price)
+
+                    message += f"""💰 <b>ИЗМЕНЕНИЕ ЦЕНЫ:</b>
+    📊 Было: {old_price}
+    📊 Стало: {new_price}
+    {price_direction}
+
+    """
+
+                # Добавляем информацию об изменении описания
+                if description_changed:
+                    old_desc = changes.get("old_description", "")
+                    new_desc = changes.get("new_description", "")
+
+                    logger.info(f"📝 Description change details for car {car.id}: "
+                                f"{len(old_desc)} chars → {len(new_desc)} chars")
+
+                    # Показываем первые 100 символов старого и нового описания
+                    old_desc_short = (old_desc[:100] + "...") if len(old_desc) > 100 else old_desc
+                    new_desc_short = (new_desc[:100] + "...") if len(new_desc) > 100 else new_desc
+
+                    message += f"""📝 <b>ИЗМЕНЕНИЕ ОПИСАНИЯ:</b>
+    📄 Было: "{old_desc_short or 'пустое'}"
+    📄 Стало: "{new_desc_short or 'пустое'}"
+
+    """
+
+                message += f"""🔗 <a href="{car.link}">Посмотреть объявление</a>
+
+    ⏰ <i>Проверка изменений: {datetime.now().strftime('%d.%m.%Y %H:%M')}</i>"""
+
+                logger.debug(f"📱 Sending change notification message for car {car.id} ({len(message)} chars)")
+
+                await self.bot.send_message(
+                    chat_id=settings.telegram_chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=False
+                )
+
+                logger.info(f"✅ Changes notification sent successfully for car {car.id}")
+
+            except Exception as e:
+                logger.error(f"❌ Error sending changes notification for car {car.id}: {str(e)}")
+                logger.debug(f"🔍 Exception details: {type(e).__name__}: {str(e)}")
+
+        async def send_daily_changes_summary(self, summary: Dict[str, Any]):
+            """📊 Отправляет ежедневную сводку изменений"""
+            logger.info("📊 send_daily_changes_summary() called")
+
+            try:
+                total_checked = summary.get("total_checked", 0)
+                total_changes = summary.get("total_changes", 0)
+                price_changes = summary.get("price_changes", 0)
+                description_changes = summary.get("description_changes", 0)
+                unavailable_count = summary.get("unavailable_count", 0)
+                error_count = summary.get("error_count", 0)
+                elapsed_seconds = summary.get("elapsed_seconds", 0)
+
+                logger.info(f"📊 Summary stats: {total_checked} checked, {total_changes} changes, "
+                            f"{price_changes} price, {description_changes} desc, "
+                            f"{unavailable_count} unavailable, {error_count} errors, {elapsed_seconds:.1f}s")
+
+                if total_changes == 0 and unavailable_count == 0 and error_count == 0:
+                    # Если изменений нет, отправляем краткую сводку
+                    message = f"""📊 <b>Ежедневная проверка изменений</b>
+
+    ✅ Проверено: {total_checked} объявлений
+    😴 Изменений не найдено
+    ❌ Недоступных: {unavailable_count}
+    ⏱️ Время: {elapsed_seconds:.1f}с
+
+    ⏰ {datetime.now().strftime('%d.%m.%Y %H:%M')}"""
+                    logger.info("📱 Sending brief summary (no changes)")
+                else:
+                    # Подробная сводка с изменениями
+                    message = f"""📊 <b>ЕЖЕДНЕВНАЯ СВОДКА ИЗМЕНЕНИЙ</b>
+
+    🔍 <b>Проверено объявлений:</b> {total_checked}
+    🔄 <b>Найдено изменений:</b> {total_changes}
+
+    """
+                    if price_changes > 0:
+                        message += f"💰 Изменения цен: {price_changes}\n"
+                    if description_changes > 0:
+                        message += f"📝 Изменения описаний: {description_changes}\n"
+                    if unavailable_count > 0:
+                        message += f"❌ Недоступных/проданных: {unavailable_count}\n"
+                    if error_count > 0:
+                        message += f"⚠️ Ошибок при проверке: {error_count}\n"
+
+                    success_rate = ((total_checked - error_count) / total_checked * 100) if total_checked > 0 else 0
+                    message += f"""
+    📈 <b>Эффективность:</b> {success_rate:.1f}% успешных проверок
+    ⏱️ <b>Время выполнения:</b> {elapsed_seconds:.1f} секунд
+
+    ⏰ <i>Следующая проверка: завтра в то же время</i>
+    🕐 <i>Время проверки: {datetime.now().strftime('%d.%m.%Y %H:%M')}</i>"""
+                    logger.info("📱 Sending detailed summary (with changes)")
+
+                await self.bot.send_message(
+                    chat_id=settings.telegram_chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML
+                )
+
+                logger.info(
+                    f"✅ Daily changes summary sent successfully: {total_changes} changes in {total_checked} cars")
+
+            except Exception as e:
+                logger.error(f"❌ Error sending daily changes summary: {str(e)}")
+                logger.debug(f"🔍 Exception details: {type(e).__name__}: {str(e)}")
+
+        async def send_price_drops_alert(self, cars_with_drops: List, min_drop: int):
+            """💸 Отправляет уведомление о значительных падениях цен"""
+            if not cars_with_drops:
+                return
+
+            try:
+                message = f"""💸💸 <b>ЗНАЧИТЕЛЬНЫЕ ПАДЕНИЯ ЦЕН!</b> 💸💸
+
+    🎯 Найдено {len(cars_with_drops)} объявлений со снижением цены на {min_drop}€+
+
+    """
+
+                for i, car in enumerate(cars_with_drops[:5], 1):  # Показываем топ-5
+                    old_price_num = self._extract_price_number(car.previous_price)
+                    new_price_num = self._extract_price_number(car.price)
+
+                    if old_price_num and new_price_num:
+                        drop_amount = old_price_num - new_price_num
+                        drop_percent = (drop_amount / old_price_num) * 100
+
+                        message += f"""<b>{i}. {car.brand} {car.year or ''}</b>
+    📝 {car.title[:50]}{'...' if len(car.title) > 50 else ''}
+    💰 Было: {car.previous_price} → Стало: {car.price}
+    📉 Снижение: -{drop_amount:,}€ ({drop_percent:.1f}%)
+    🔗 <a href="{car.link}">Посмотреть</a>
+
+    """
+
+                if len(cars_with_drops) > 5:
+                    message += f"<i>... и еще {len(cars_with_drops) - 5} объявлений</i>\n\n"
+
+                message += "🏃‍♂️ <i>Возможно, срочная продажа или торг!</i>"
+
+                await self.bot.send_message(
+                    chat_id=settings.telegram_chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=False
+                )
+
+                logger.info(f"🚨 Price drops alert sent: {len(cars_with_drops)} cars with significant drops")
+
+            except Exception as e:
+                logger.error(f"❌ Error sending price drops alert: {e}")
+
+        def _analyze_price_change(self, old_price: str, new_price: str) -> str:
+            """Анализирует изменение цены и возвращает эмодзи + описание"""
+            try:
+                old_num = self._extract_price_number(old_price)
+                new_num = self._extract_price_number(new_price)
+
+                if not old_num or not new_num:
+                    return "🔄 Изменение цены"
+
+                diff = new_num - old_num
+                percent_change = (diff / old_num) * 100
+
+                if diff > 0:
+                    if percent_change > 10:
+                        return f"📈 Значительное повышение (+{diff:,}€, +{percent_change:.1f}%)"
+                    else:
+                        return f"📈 Повышение (+{diff:,}€, +{percent_change:.1f}%)"
+                elif diff < 0:
+                    if abs(percent_change) > 10:
+                        return f"📉 Значительное снижение ({diff:,}€, {percent_change:.1f}%) 🎯"
+                    else:
+                        return f"📉 Снижение ({diff:,}€, {percent_change:.1f}%)"
+                else:
+                    return "🔄 Цена не изменилась (возможно, формат)"
+
+            except Exception:
+                return "🔄 Изменение цены"
+
+        def _extract_price_number(self, price_text: str) -> Optional[int]:
+            """Извлекает число из текста цены"""
+            import re
+            if not price_text:
+                return None
+
+            # Убираем все кроме цифр
+            numbers = re.findall(r'\d+', price_text.replace(',', '').replace(' ', ''))
+            if numbers:
+                try:
+                    return int(''.join(numbers))
+                except:
+                    return None
+            return None

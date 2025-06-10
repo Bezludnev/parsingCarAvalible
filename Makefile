@@ -201,3 +201,197 @@ list-reports: ## List HTML reports
 .PHONY: reports-stats
 reports-stats: ## Get reports statistics
 	@echo "📊 Getting reports statistics..."
+
+
+##@ Changes Tracking with Detailed Logs (NEW)
+.PHONY: check-changes-verbose
+check-changes-verbose: ## Запустить проверку изменений с подробными логами
+	@echo "🔄 Checking all cars for changes (verbose logs)..."
+	curl -X POST http://localhost:8000/changes/check-all | python3 -m json.tool &
+	@echo "📋 Watching logs for detailed output..."
+	docker-compose logs -f --tail=50 app
+
+.PHONY: test-single-car-change
+test-single-car-change: ## Проверить изменения одной машины (нужен CAR_ID)
+	@echo "🔍 Testing single car change detection..."
+	@if [ -z "$(CAR_ID)" ]; then \
+		echo "❌ Usage: make test-single-car-change CAR_ID=123"; \
+	else \
+		echo "🎯 Checking car ID: $(CAR_ID)"; \
+		curl -X POST "http://localhost:8000/changes/check-cars" \
+			-H "Content-Type: application/json" \
+			-d '[$(CAR_ID)]' | python3 -m json.tool & \
+		echo "📋 Watching logs..."; \
+		docker-compose logs -f --tail=20 app; \
+	fi
+
+.PHONY: logs-changes
+logs-changes: ## Показать логи связанные с отслеживанием изменений
+	@echo "📋 Filtering logs for changes tracking..."
+	docker-compose logs app | grep -E "(check.*changes|_check_single_car|get_single_car_data|update_.*_change|send_car_changes)" | tail -30
+
+.PHONY: logs-changes-live
+logs-changes-live: ## Живые логи отслеживания изменений
+	@echo "📋 Live logs for changes tracking..."
+	docker-compose logs -f app | grep --line-buffered -E "(check.*changes|_check_single_car|get_single_car_data|update_.*_change|send_car_changes|scraper.*single)"
+.PHONY: check-changes
+check-changes: ## Запустить проверку изменений всех машин
+	@echo "🔄 Checking all cars for changes..."
+	curl -X POST http://localhost:8000/changes/check-all | python3 -m json.tool
+
+.PHONY: check-specific-changes
+check-specific-changes: ## Проверить изменения конкретных машин (нужен CAR_IDS)
+	@echo "🎯 Checking specific cars for changes..."
+	@if [ -z "$(CAR_IDS)" ]; then \
+		echo "❌ Usage: make check-specific-changes CAR_IDS='[123,456,789]'"; \
+	else \
+		curl -X POST "http://localhost:8000/changes/check-cars" \
+			-H "Content-Type: application/json" \
+			-d '$(CAR_IDS)' | python3 -m json.tool; \
+	fi
+
+.PHONY: changes-summary
+changes-summary: ## Сводка изменений за 7 дней
+	@echo "📊 Getting changes summary..."
+	curl -s "http://localhost:8000/changes/summary?days=7" | python3 -m json.tool
+
+.PHONY: recent-price-changes
+recent-price-changes: ## Показать недавние изменения цен
+	@echo "💰 Getting recent price changes..."
+	curl -s "http://localhost:8000/changes/recent-price-changes?days=7" | python3 -m json.tool
+
+.PHONY: recent-description-changes
+recent-description-changes: ## Показать недавние изменения описаний
+	@echo "📝 Getting recent description changes..."
+	curl -s "http://localhost:8000/changes/recent-description-changes?days=7" | python3 -m json.tool
+
+.PHONY: price-drops
+price-drops: ## Показать значительные падения цен (500€+)
+	@echo "💸 Getting significant price drops..."
+	curl -s "http://localhost:8000/changes/price-drops?days=7&min_drop_euros=500" | python3 -m json.tool
+
+.PHONY: price-drops-big
+price-drops-big: ## Показать крупные падения цен (1000€+)
+	@echo "💸💸 Getting big price drops..."
+	curl -s "http://localhost:8000/changes/price-drops?days=7&min_drop_euros=1000" | python3 -m json.tool
+
+.PHONY: price-drops-alert
+price-drops-alert: ## Отправить уведомление о падениях цен в Telegram
+	@echo "📱 Sending price drops alert to Telegram..."
+	curl -X POST "http://localhost:8000/changes/price-drops-alert?days=7&min_drop_euros=1000" | python3 -m json.tool
+
+.PHONY: never-checked
+never-checked: ## Показать машины которые ни разу не проверялись
+	@echo "🔍 Getting never checked cars..."
+	curl -s "http://localhost:8000/changes/never-checked?limit=20" | python3 -m json.tool
+
+.PHONY: changes-status
+changes-status: ## Статус системы отслеживания изменений
+	@echo "📊 Getting changes tracking status..."
+	curl -s http://localhost:8000/changes/status | python3 -m json.tool
+
+##@ Database Migration for Changes
+.PHONY: migrate-changes
+migrate-changes: ## Применить миграцию для отслеживания изменений
+	@echo "📈 Applying changes tracking migration..."
+	docker-compose exec $(SERVICE_NAME) alembic upgrade head
+
+.PHONY: create-migration-changes
+create-migration-changes: ## Создать новую миграцию для изменений
+	@echo "📝 Creating changes tracking migration..."
+	docker-compose exec $(SERVICE_NAME) alembic revision --autogenerate -m "Add changes tracking fields"
+
+##@ Advanced Changes Analysis
+.PHONY: changes-full-report
+changes-full-report: ## Полный отчет по изменениям
+	@echo "📋 Full changes report..."
+	@echo "\n1. Changes Summary:"
+	@make changes-summary
+	@echo "\n2. Recent Price Changes:"
+	@make recent-price-changes
+	@echo "\n3. Price Drops:"
+	@make price-drops
+	@echo "\n4. Status:"
+	@make changes-status
+
+.PHONY: test-changes-pipeline
+test-changes-pipeline: ## Тест пайплайна отслеживания изменений
+	@echo "🧪 Testing changes tracking pipeline..."
+	@echo "1. Status check..."
+	@make changes-status
+	@echo "\n2. Never checked cars..."
+	@make never-checked
+	@echo "\n3. Running changes check..."
+	@make check-changes
+
+##@ Quick Testing & Debugging
+.PHONY: test-changes-system
+test-changes-system: ## Полный тест системы отслеживания изменений
+	@echo "🧪 Testing complete changes tracking system..."
+	@echo "\n1️⃣ Checking system status..."
+	@make changes-status
+	@echo "\n2️⃣ Getting never checked cars..."
+	@make never-checked
+	@echo "\n3️⃣ Running changes check with logs..."
+	@make check-changes-verbose
+
+.PHONY: debug-car-scraping
+debug-car-scraping: ## Отладка скрапинга одной машины (нужен CAR_ID)
+	@if [ -z "$(CAR_ID)" ]; then \
+		echo "❌ Usage: make debug-car-scraping CAR_ID=123"; \
+	else \
+		echo "🔍 Debug scraping for car $(CAR_ID)..."; \
+		echo "📋 First, get car info from DB:"; \
+		curl -s "http://localhost:8000/cars/?filter_name=audi&limit=100" | python3 -c "import sys, json; cars = json.load(sys.stdin); [print(f'🚗 ID: {c[\"id\"]}, Title: {c[\"title\"][:60]}, Link: {c[\"link\"]}') for c in cars if c['id'] == $(CAR_ID)]"; \
+		echo "\n🔄 Now testing changes check:"; \
+		make test-single-car-change CAR_ID=$(CAR_ID); \
+	fi
+
+.PHONY: show-recent-cars
+show-recent-cars: ## Показать недавние машины для тестирования
+	@echo "🚗 Recent cars for testing:"
+	@curl -s "http://localhost:8000/cars/?filter_name=bmw&limit=10" | python3 -c "import sys, json; cars = json.load(sys.stdin); [print(f'🚗 ID: {c[\"id\"]}, Title: {c[\"title\"][:50]}, Price: {c[\"price\"]}') for c in cars[:5]]" 2>/dev/null || echo "No BMW cars found"
+	@echo "\n💡 To test: make test-single-car-change CAR_ID=<ID>"
+	@echo "💡 To debug: make debug-car-scraping CAR_ID=<ID>"
+
+.PHONY: logs-db-operations
+logs-db-operations: ## Логи операций с базой данных
+	@echo "🗄️ Database operations logs..."
+	docker-compose logs app | grep -E "(update_.*_change|mark_as_unavailable|get_cars_for_changes)" | tail -20
+.PHONY: morning-changes
+morning-changes: ## Утренний обзор изменений
+	@echo "🌅 Morning changes overview..."
+	@make changes-summary
+	@make price-drops
+	@make changes-status
+
+.PHONY: evening-changes
+evening-changes: ## Вечерний обзор изменений + отправка alerts
+	@echo "🌆 Evening changes overview with alerts..."
+	@make changes-summary
+	@make price-drops-big
+	@make price-drops-alert
+
+##@ Quick Commands (Updated)
+.PHONY: full-status
+full-status: status ai-status changes-status ## Полный статус всех систем
+
+.PHONY: daily-routine
+daily-routine: ## Ежедневная рутина: все проверки + анализ + изменения
+	@echo "📅 Daily routine: monitoring + analysis + changes..."
+	@make status
+	@make database-stats
+	@make changes-summary
+	@make scheduled-analysis
+
+##@ Help (Updated)
+help: ## Show help with new changes commands
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-27s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "📋 Examples:"
+	@echo "  make check-changes                    # Check all cars for changes"
+	@echo "  make check-specific-changes CAR_IDS='[123,456]'  # Check specific cars"
+	@echo "  make price-drops                      # Show price drops 500€+"
+	@echo "  make price-drops-alert                # Send price drops to Telegram"
+	@echo "  make changes-full-report              # Complete changes report"
+	@echo "  make daily-routine                    # Full daily overview"
