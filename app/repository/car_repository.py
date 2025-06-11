@@ -1,6 +1,6 @@
 # app/repository/car_repository.py - с методом для получения существующих ссылок
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc, func, text
+from sqlalchemy import select, and_, or_, desc, func, text
 from app.models.car import Car
 from app.schemas.car import CarCreate
 from typing import List, Optional, Dict, Any, Set
@@ -267,3 +267,266 @@ class CarRepository:
             'avg_year': round(stats.avg_year, 1) if stats.avg_year else None,
             'avg_mileage': round(stats.avg_mileage, 1) if stats.avg_mileage else None
         }
+
+    async def get_cars_for_changes_check(self, cutoff_time: datetime, limit: int = 500) -> List[Car]:
+        """🔄 Получает машины которые нужно проверить на изменения"""
+        logger.info(
+            f"🔍 get_cars_for_changes_check() called with cutoff: {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')}, limit: {limit}")
+
+        result = await self.session.execute(
+            select(Car)
+            .where(
+                and_(
+                    # Машины которые не проверялись давно или вообще не проверялись
+                    or_(
+                        Car.last_checked_at.is_(None),
+                        Car.last_checked_at < cutoff_time
+                    ),
+                    # Исключаем помеченные как недоступные (можно добавить поле is_available)
+                    Car.is_notified == True  # Только уже обработанные машины
+                )
+            )
+            .order_by(
+                # MySQL compatible ordering: NULL values first, then by date
+                Car.last_checked_at.is_(None).desc(),
+                Car.last_checked_at.asc(),
+                Car.created_at.desc()
+            )
+            .limit(limit)
+        )
+        cars = result.scalars().all()
+
+        # Детальная статистика
+        never_checked = sum(1 for car in cars if car.last_checked_at is None)
+        old_checked = len(cars) - never_checked
+
+        logger.info(f"📊 get_cars_for_changes_check() found {len(cars)} cars:")
+        logger.info(f"  🆕 Never checked: {never_checked}")
+        logger.info(f"  ⏰ Old checked: {old_checked}")
+
+        if cars:
+            oldest_car = min((car for car in cars if car.last_checked_at),
+                             key=lambda x: x.last_checked_at, default=None)
+            if oldest_car and oldest_car.last_checked_at:
+                logger.info(
+                    f"  📅 Oldest check: {oldest_car.last_checked_at.strftime('%Y-%m-%d %H:%M:%S')} (car {oldest_car.id})")
+
+        return cars
+
+    async def update_last_checked(self, car_id: int):
+        """📅 Обновляет время последней проверки"""
+        logger.debug(f"📅 update_last_checked() for car {car_id}")
+
+        car = await self.session.get(Car, car_id)
+        if car:
+            old_time = car.last_checked_at
+            car.last_checked_at = datetime.now()
+            await self.session.commit()
+
+            logger.debug(f"✅ Car {car_id} last_checked updated: "
+                         f"{old_time.strftime('%H:%M:%S') if old_time else 'never'} → "
+                         f"{car.last_checked_at.strftime('%H:%M:%S')}")
+        else:
+            logger.warning(f"❌ Car {car_id} not found for last_checked update")
+
+    async def update_price_change(self, car_id: int, old_price: str, new_price: str):
+        """💰 Обновляет информацию об изменении цены"""
+        logger.info(f"💰 update_price_change() for car {car_id}: '{old_price}' → '{new_price}'")
+
+        car = await self.session.get(Car, car_id)
+        if car:
+            car.previous_price = old_price
+            car.price = new_price
+            car.price_changed_at = datetime.now()
+            car.price_changes_count = (car.price_changes_count or 0) + 1
+            car.last_checked_at = datetime.now()
+            await self.session.commit()
+
+            logger.info(f"✅ Price change saved for car {car_id}: "
+                        f"change #{car.price_changes_count} at {car.price_changed_at.strftime('%H:%M:%S')}")
+        else:
+            logger.error(f"❌ Car {car_id} not found for price change update")
+
+    async def update_description_change(self, car_id: int, old_description: str, new_description: str):
+        """📝 Обновляет информацию об изменении описания"""
+        logger.info(f"📝 update_description_change() for car {car_id}: "
+                    f"{len(old_description or '')} chars → {len(new_description or '')} chars")
+
+        car = await self.session.get(Car, car_id)
+        if car:
+            car.previous_description = old_description
+            car.description = new_description
+            car.description_changed_at = datetime.now()
+            car.description_changes_count = (car.description_changes_count or 0) + 1
+            car.last_checked_at = datetime.now()
+            await self.session.commit()
+
+            logger.info(f"✅ Description change saved for car {car_id}: "
+                        f"change #{car.description_changes_count} at {car.description_changed_at.strftime('%H:%M:%S')}")
+        else:
+            logger.error(f"❌ Car {car_id} not found for description change update")
+
+    async def mark_as_unavailable(self, car_id: int):
+        """❌ Помечает машину как недоступную (продана/удалена)"""
+        logger.warning(f"❌ mark_as_unavailable() for car {car_id}")
+
+        # Можно добавить поле is_available в модель, пока просто обновим время проверки
+        car = await self.session.get(Car, car_id)
+        if car:
+            car.last_checked_at = datetime.now()
+            # Можно добавить поле car.is_available = False
+            await self.session.commit()
+
+            logger.warning(f"🚫 Car {car_id} marked as unavailable: {car.title[:50]}")
+        else:
+            logger.error(f"❌ Car {car_id} not found for unavailable marking")
+
+    async def get_recent_price_changes(self, days: int = 7) -> List[Car]:
+        """💰 Получает машины с недавними изменениями цены"""
+        cutoff_date = datetime.now() - timedelta(days=days)
+        result = await self.session.execute(
+            select(Car)
+            .where(
+                and_(
+                    Car.price_changed_at >= cutoff_date,
+                    Car.price_changed_at.isnot(None)
+                )
+            )
+            .order_by(Car.price_changed_at.desc())
+        )
+        return result.scalars().all()
+
+    async def get_recent_description_changes(self, days: int = 7) -> List[Car]:
+        """📝 Получает машины с недавними изменениями описания"""
+        cutoff_date = datetime.now() - timedelta(days=days)
+        result = await self.session.execute(
+            select(Car)
+            .where(
+                and_(
+                    Car.description_changed_at >= cutoff_date,
+                    Car.description_changed_at.isnot(None)
+                )
+            )
+            .order_by(Car.description_changed_at.desc())
+        )
+        return result.scalars().all()
+
+    async def get_changes_summary(self, days: int = 7) -> Dict[str, Any]:
+        """📊 Сводка изменений за период"""
+        cutoff_date = datetime.now() - timedelta(days=days)
+
+        # Изменения цен
+        price_changes_result = await self.session.execute(
+            select(func.count(Car.id))
+            .where(
+                and_(
+                    Car.price_changed_at >= cutoff_date,
+                    Car.price_changed_at.isnot(None)
+                )
+            )
+        )
+        price_changes_count = price_changes_result.scalar()
+
+        # Изменения описаний
+        desc_changes_result = await self.session.execute(
+            select(func.count(Car.id))
+            .where(
+                and_(
+                    Car.description_changed_at >= cutoff_date,
+                    Car.description_changed_at.isnot(None)
+                )
+            )
+        )
+        desc_changes_count = desc_changes_result.scalar()
+
+        # Общее количество проверок
+        checks_result = await self.session.execute(
+            select(func.count(Car.id))
+            .where(
+                and_(
+                    Car.last_checked_at >= cutoff_date,
+                    Car.last_checked_at.isnot(None)
+                )
+            )
+        )
+        total_checks = checks_result.scalar()
+
+        # Топ машин с наибольшим количеством изменений цены
+        top_price_changers_result = await self.session.execute(
+            select(Car)
+            .where(Car.price_changes_count > 0)
+            .order_by(Car.price_changes_count.desc())
+            .limit(5)
+        )
+        top_price_changers = top_price_changers_result.scalars().all()
+
+        return {
+            "period_days": days,
+            "price_changes_count": price_changes_count,
+            "description_changes_count": desc_changes_count,
+            "total_checks": total_checks,
+            "top_price_changers": [
+                {
+                    "id": car.id,
+                    "title": car.title,
+                    "price_changes": car.price_changes_count,
+                    "current_price": car.price,
+                    "previous_price": car.previous_price
+                }
+                for car in top_price_changers
+            ]
+        }
+
+    async def get_cars_never_checked(self, limit: int = 100) -> List[Car]:
+        """🔍 Получает машины которые ни разу не проверялись на изменения"""
+        result = await self.session.execute(
+            select(Car)
+            .where(
+                and_(
+                    Car.last_checked_at.is_(None),
+                    Car.is_notified == True  # Только уже обработанные
+                )
+            )
+            .order_by(Car.created_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_cars_with_price_drops(self, days: int = 7, min_drop_euros: int = 500) -> List[Car]:
+        """💸 Получает машины со значительным падением цены"""
+        cutoff_date = datetime.now() - timedelta(days=days)
+
+        # Получаем машины с недавними изменениями цены
+        cars_with_changes = await self.get_recent_price_changes(days)
+
+        significant_drops = []
+        for car in cars_with_changes:
+            if car.previous_price and car.price:
+                try:
+                    # Извлекаем числовые значения цен
+                    old_price_num = self._extract_price_number(car.previous_price)
+                    new_price_num = self._extract_price_number(car.price)
+
+                    if old_price_num and new_price_num:
+                        price_drop = old_price_num - new_price_num
+                        if price_drop >= min_drop_euros:
+                            significant_drops.append(car)
+                except:
+                    continue
+
+        return significant_drops
+
+    def _extract_price_number(self, price_text: str) -> Optional[int]:
+        """Извлекает число из текста цены"""
+        import re
+        if not price_text:
+            return None
+
+        # Убираем все кроме цифр
+        numbers = re.findall(r'\d+', price_text.replace(',', '').replace(' ', ''))
+        if numbers:
+            try:
+                return int(''.join(numbers))
+            except:
+                return None
+        return None

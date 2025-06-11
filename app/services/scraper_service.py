@@ -1,4 +1,4 @@
-# app/services/scraper_service.py - ОПТИМИЗИРОВАННАЯ с проверкой существующих ссылок
+# app/services/scraper_service.py - ИСПРАВЛЕН: добавлены импорты и метод для одной машины
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -8,7 +8,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import re
 import asyncio
-from typing import List, Dict, Optional, Set
+from datetime import datetime
+from typing import List, Dict, Optional, Set, Any
 from app.config import settings
 from app.schemas.car import CarCreate
 import httpx
@@ -255,6 +256,175 @@ class ScraperService:
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._scrape_cars_sync, filter_config, existing_links)
+
+    # 🆕 НОВЫЕ МЕТОДЫ ДЛЯ ОТСЛЕЖИВАНИЯ ИЗМЕНЕНИЙ
+
+    async def get_single_car_data(self, car_url: str) -> Optional[Dict[str, Any]]:
+        """🎯 Получает актуальные данные по конкретной ссылке (для проверки изменений)"""
+        logger.info(f"🎯 get_single_car_data() called for: {car_url[:50]}...")
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._get_single_car_data_sync, car_url)
+
+    def _get_single_car_data_sync(self, car_url: str) -> Optional[Dict[str, Any]]:
+        """Синхронное получение данных одной машины"""
+        driver = self._create_driver()
+        try:
+            logger.debug(f"🌐 Loading page: {car_url}")
+            driver.get(car_url)
+
+            # Ждем загрузки основного контента
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "announcement-block"))
+                )
+            except:
+                # Если не нашли announcement-block, пробуем другие селекторы
+                try:
+                    WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.CLASS_NAME, "page-content"))
+                    )
+                except:
+                    logger.warning(f"⚠️ Page structure might have changed for: {car_url}")
+
+            html = driver.page_source
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Проверяем что страница не показывает "объявление удалено"
+            if self._is_ad_removed(soup):
+                logger.info(f"❌ Ad removed/unavailable: {car_url}")
+                return None
+
+            # Извлекаем цену
+            price = self._extract_price_from_page(soup)
+
+            # Извлекаем описание
+            description = self._extract_description_from_page(soup)
+
+            # Дополнительные данные для полноты
+            title = self._extract_title_from_page(soup)
+
+            result = {
+                "price": price,
+                "description": description,
+                "title": title,
+                "url": car_url,
+                "last_updated": datetime.now().isoformat()
+            }
+
+            logger.debug(f"✅ Single car data extracted: price={price}, desc_len={len(description or '')}")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Error getting single car data from {car_url}: {e}")
+            return None
+        finally:
+            driver.quit()
+
+    def _is_ad_removed(self, soup: BeautifulSoup) -> bool:
+        """Проверяет удалено ли объявление"""
+        # Ищем признаки удаленного объявления
+        removed_indicators = [
+            "объявление удалено",
+            "ad has been removed",
+            "404",
+            "не найдено",
+            "not found",
+            "page not found"
+        ]
+
+        page_text = soup.get_text().lower()
+        return any(indicator in page_text for indicator in removed_indicators)
+
+    def _extract_price_from_page(self, soup: BeautifulSoup) -> str:
+        """Извлекает цену со страницы объявления"""
+        # Пробуем разные селекторы для цены
+        price_selectors = [
+            ".announcement-price__cost",
+            ".price-section .price",
+            ".announcement-block .price",
+            "[data-testid='price']",
+            ".price-block .price",
+            ".cost-primary"
+        ]
+
+        for selector in price_selectors:
+            price_element = soup.select_one(selector)
+            if price_element:
+                price_text = price_element.get_text(strip=True)
+                if price_text and any(c.isdigit() for c in price_text):
+                    logger.debug(f"💰 Price found with selector '{selector}': {price_text}")
+                    return price_text
+
+        # Fallback: ищем текст содержащий € и цифры
+        for element in soup.find_all(text=True):
+            if '€' in element and any(c.isdigit() for c in element):
+                price_text = element.strip()
+                if len(price_text) < 50:  # Разумная длина для цены
+                    logger.debug(f"💰 Price found via fallback: {price_text}")
+                    return price_text
+
+        logger.warning("💰 Price not found on page")
+        return ""
+
+    def _extract_description_from_page(self, soup: BeautifulSoup) -> str:
+        """Извлекает описание со страницы объявления"""
+        # Пробуем разные селекторы для описания
+        description_selectors = [
+            ".js-description",
+            ".announcement-description",
+            ".description-text",
+            "[data-testid='description']",
+            ".announcement-block .description",
+            ".ad-description"
+        ]
+
+        for selector in description_selectors:
+            desc_element = soup.select_one(selector)
+            if desc_element:
+                # Собираем текст из всех параграфов
+                paragraphs = desc_element.find_all(['p', 'div', 'span'])
+                if paragraphs:
+                    desc_text = ' '.join(p.get_text(' ', strip=True) for p in paragraphs)
+                else:
+                    desc_text = desc_element.get_text(' ', strip=True)
+
+                if desc_text and len(desc_text.strip()) > 10:
+                    logger.debug(f"📝 Description found with selector '{selector}': {len(desc_text)} chars")
+                    return desc_text.strip()
+
+        logger.warning("📝 Description not found on page")
+        return ""
+
+    def _extract_title_from_page(self, soup: BeautifulSoup) -> str:
+        """Извлекает заголовок объявления"""
+        # Пробуем разные селекторы для заголовка
+        title_selectors = [
+            ".announcement-title",
+            ".page-title h1",
+            ".ad-title",
+            "h1.title",
+            "[data-testid='title']"
+        ]
+
+        for selector in title_selectors:
+            title_element = soup.select_one(selector)
+            if title_element:
+                title_text = title_element.get_text(strip=True)
+                if title_text:
+                    logger.debug(f"🏷️ Title found: {title_text[:50]}")
+                    return title_text
+
+        # Fallback: title из <title> тега
+        title_tag = soup.find('title')
+        if title_tag:
+            title_text = title_tag.get_text(strip=True)
+            # Убираем лишние части типа "| Bazaraki"
+            if '|' in title_text:
+                title_text = title_text.split('|')[0].strip()
+            return title_text
+
+        return ""
 
     async def get_available_filters(self) -> Dict[str, Dict]:
         """Возвращает доступные фильтры с информацией о режиме"""
