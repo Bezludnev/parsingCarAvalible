@@ -45,6 +45,10 @@ class ScraperService:
     def _create_driver(self) -> webdriver.Chrome:
         """Create Chrome driver using path from settings"""
         service = Service(executable_path=settings.chromedriver_path)
+        self.options.add_argument(
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        self.options.add_argument('--accept-language=en-US,en;q=0.9')
+        self.options.add_argument('--disable-blink-features=AutomationControlled')
         return webdriver.Chrome(service=service, options=self.options)
 
     def _has_urgent_keywords(self, text: str) -> bool:
@@ -214,8 +218,41 @@ class ScraperService:
 
             html = driver.page_source
             soup = BeautifulSoup(html, "html.parser")
-            ads = soup.find_all("div", class_="advert js-item-listing")
+            debug_file = f"/app/debug_{filter_name}.html"
+            with open(debug_file, 'w', encoding='utf-8') as f:
+                f.write(html)
+            logger.info(f"🐛 DEBUG: HTML сохранен в {debug_file}")
+            # 🐛 ПРОСТОЙ ДЕБАГ
+            filter_name = filter_config.get("filter_name", "unknown")
+            logger.info(f"🐛 DEBUG {filter_name}: HTML размер={len(html)} символов")
+            logger.info(f"🐛 DEBUG {filter_name}: div элементов всего={len(soup.find_all('div'))}")
 
+            # Проверяем разные селекторы для объявлений:
+            selectors = [
+                ("div.advert.js-item-listing", "advert js-item-listing"),
+                ("div.advert", "advert"),
+                ("[class*='advert']", None),
+                (".announcement-item", "announcement-item"),
+            ]
+
+            for selector, class_name in selectors:
+                if class_name:
+                    found = soup.find_all("div", class_=class_name)
+                else:
+                    found = soup.select(selector)
+                logger.info(f"🐛 DEBUG {filter_name}: '{selector}' найдено {len(found)} элементов")
+
+            # Проверяем ссылки на авто:
+            all_links = soup.find_all('a', href=True)
+            car_links = [a for a in all_links if 'bazaraki.com/adv/' in a.get('href', '')]
+            logger.info(f"🐛 DEBUG {filter_name}: всего ссылок={len(all_links)}, на авто={len(car_links)}")
+
+            # Проверяем заголовок страницы:
+            title = soup.find('title')
+            page_title = title.text[:100] if title else "нет заголовка"
+            logger.info(f"🐛 DEBUG {filter_name}: заголовок='{page_title}'")
+
+            ads = soup.select("div.advert.js-item-listing")
             logger.info(f"📄 Найдено {len(ads)} объявлений на странице для {filter_name}")
 
             cars = []
@@ -454,3 +491,54 @@ class ScraperService:
         except:
             pass
         return "неизвестно"
+
+
+def _debug_page_content(self, soup: BeautifulSoup, filter_name: str):
+    """🐛 Дебаг содержимого страницы"""
+    logger.info(f"🐛 DEBUG {filter_name} - анализ страницы:")
+
+    # Проверяем основные контейнеры
+    all_divs = soup.find_all("div")
+    logger.info(f"📄 Всего div элементов: {len(all_divs)}")
+
+    # Ищем объявления по разным селекторам
+    selectors_to_try = [
+        "div.advert.js-item-listing",  # Текущий
+        "div.advert",  # Упрощенный
+        "div[class*='advert']",  # Любой с advert в классе
+        "div[class*='item']",  # Любой с item в классе
+        "div[class*='listing']",  # Любой с listing в классе
+        ".announcement-item",  # Альтернативный
+        ".ad-item",  # Еще альтернативный
+        "[data-testid*='ad']",  # По data-testid
+    ]
+
+    for selector in selectors_to_try:
+        found = soup.select(selector)
+        logger.info(f"🔍 '{selector}': найдено {len(found)} элементов")
+
+        if len(found) > 0 and len(found) <= 5:
+            # Показываем структуру первых элементов
+            for i, elem in enumerate(found[:2]):
+                classes = elem.get('class', [])
+                logger.info(f"  Элемент {i + 1}: классы={classes}")
+
+    # Проверяем есть ли ссылки на машины
+    car_links = soup.find_all("a", href=True)
+    bazaraki_links = [a for a in car_links if "bazaraki.com/adv/" in a.get('href', '')]
+    logger.info(f"🔗 Ссылок на объявления: {len(bazaraki_links)}")
+
+    # Проверяем заголовок страницы
+    title = soup.find("title")
+    page_title = title.text if title else "Нет заголовка"
+    logger.info(f"📄 Заголовок страницы: {page_title}")
+
+    # Проверяем есть ли ошибки на странице
+    error_indicators = [
+        "404", "not found", "page not found",
+        "error", "ошибка", "нет результатов", "no results"
+    ]
+    page_text = soup.get_text().lower()
+    for indicator in error_indicators:
+        if indicator in page_text:
+            logger.warning(f"⚠️ Найден индикатор проблемы: '{indicator}'")
