@@ -58,6 +58,8 @@ class MonitorService:
             # Получаем существующие ссылки для этого фильтра
             existing_links = await repo.get_existing_links_by_filter(filter_name)
             logger.info(f"📋 _process_filter({filter_name}): {len(existing_links)} existing links in DB")
+            for link in existing_links:
+                logger.info(f"🔗 _process_filter({filter_name}) - existing link: {link}")
 
             # Передаем existing_links в scraper для оптимизации
             cars = await self.scraper.scrape_cars(filter_name, existing_links)
