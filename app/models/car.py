@@ -25,4 +25,6 @@ class Car(Base):
     is_notified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-
+    contact_attempts_count = Column(Integer, default=0)
+    last_contact_attempt = Column(DateTime)
+    seller_response_rate = Column(Float)  # % ответов продавца

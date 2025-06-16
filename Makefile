@@ -251,3 +251,33 @@ deploy-check: ## Pre-deployment checks
 	@make ai-status
 	@make check-scheduler
 	@make database-stats
+
+
+# Negotiation & Tracking Commands
+.PHONY: generate-offer
+generate-offer: ## Generate offer message for specific car (CAR_ID=123 OFFER=10000)
+	@if [ -z "$(CAR_ID)" ] || [ -z "$(OFFER)" ]; then \
+		echo "❌ Usage: make generate-offer CAR_ID=123 OFFER=10000 LANG=en"; \
+	else \
+		curl -X POST "http://localhost:8000/negotiation/generate-offer/$(CAR_ID)?offer_amount=$(OFFER)&language=$(LANG)" | python3 -m json.tool; \
+	fi
+
+.PHONY: offer-suggestions
+offer-suggestions: ## Get automated offer suggestions (BUDGET=12000)
+	@echo "💡 Getting offer suggestions for budget €$(BUDGET)..."
+	curl -s "http://localhost:8000/tracking/offer-suggestions?budget=$(BUDGET)&max_mileage=150000" | python3 -m json.tool
+
+.PHONY: desperation-analysis
+desperation-analysis: ## Analyze seller desperation (CAR_ID=123)
+	@if [ -z "$(CAR_ID)" ]; then \
+		echo "❌ Usage: make desperation-analysis CAR_ID=123"; \
+	else \
+		curl -s "http://localhost:8000/tracking/track-desperation/$(CAR_ID)" | python3 -m json.tool; \
+	fi
+
+.PHONY: daily-offers
+daily-offers: ## Daily routine: find best negotiation opportunities
+	@echo "🎯 Daily offers routine..."
+	@make offer-suggestions BUDGET=12000
+	@make price-drops-big
+	@make changes-summary
