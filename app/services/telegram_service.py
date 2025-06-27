@@ -540,7 +540,7 @@ class TelegramService:
 
     # 🆕 МЕТОДЫ ДЛЯ УВЕДОМЛЕНИЙ ОБ ИЗМЕНЕНИЯХ
 
-        async def send_car_changes_notification(self, car, changes: Dict[str, Any]):
+    async def send_car_changes_notification(self, car, changes: Dict[str, Any]):
             """🔄 Отправляет уведомление об изменениях в объявлении"""
             logger.info(f"📱 send_car_changes_notification() called for car {car.id}")
 
@@ -624,7 +624,7 @@ class TelegramService:
                 logger.error(f"❌ Error sending changes notification for car {car.id}: {str(e)}")
                 logger.debug(f"🔍 Exception details: {type(e).__name__}: {str(e)}")
 
-        async def send_daily_changes_summary(self, summary: Dict[str, Any]):
+    async def send_daily_changes_summary(self, summary: Dict[str, Any]):
             """📊 Отправляет ежедневную сводку изменений"""
             logger.info("📊 send_daily_changes_summary() called")
 
@@ -691,7 +691,7 @@ class TelegramService:
                 logger.error(f"❌ Error sending daily changes summary: {str(e)}")
                 logger.debug(f"🔍 Exception details: {type(e).__name__}: {str(e)}")
 
-        async def send_price_drops_alert(self, cars_with_drops: List, min_drop: int):
+    async def send_price_drops_alert(self, cars_with_drops: List, min_drop: int):
             """💸 Отправляет уведомление о значительных падениях цен"""
             if not cars_with_drops:
                 return
@@ -736,7 +736,7 @@ class TelegramService:
             except Exception as e:
                 logger.error(f"❌ Error sending price drops alert: {e}")
 
-        def _analyze_price_change(self, old_price: str, new_price: str) -> str:
+    def _analyze_price_change(self, old_price: str, new_price: str) -> str:
             """Анализирует изменение цены и возвращает эмодзи + описание"""
             try:
                 old_num = self._extract_price_number(old_price)
@@ -764,7 +764,7 @@ class TelegramService:
             except Exception:
                 return "🔄 Изменение цены"
 
-        def _extract_price_number(self, price_text: str) -> Optional[int]:
+    def _extract_price_number(self, price_text: str) -> Optional[int]:
             """Извлекает число из текста цены"""
             import re
             if not price_text:
